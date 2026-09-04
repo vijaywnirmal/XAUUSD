@@ -5,9 +5,12 @@
 small ($100–1,000) Vantage Raw ECN account, with **capital preservation** (shallow,
 short drawdowns) as the defining priority.
 **Outcome:** no deployable edge found. A rigorous negative result, plus reusable
-infrastructure and a documented research trail. The one marginal exception — an
-NFP-release breakout straddle — beats its null but is too small and too
-slippage-fragile to fund (see §2).
+infrastructure and a documented research trail. Two threads came closest and
+were both deliberately declined: an NFP-release breakout straddle (beats its
+null, too small and slippage-fragile to fund) and a "5 EMA" fade (the
+strongest raw directional signal found — t up to +2.8 vs a random-direction
+null — but every bracket tried landed at or below breakeven after cost; the
+operator chose to accept "still no" rather than paper-trade it). See §2.
 
 ---
 
@@ -66,6 +69,9 @@ instruments), `carry/rates_3m.csv` (7-currency 3-month rates, from FRED) and
 | **H7** | G7 FX carry (rank EUR/GBP/JPY/AUD/NZD/CAD by rate vs USD; long high-carry, short low-carry) | the carry risk premium | **KILL.** Dead 2009–2022 (Sharpe −0.05 — G7 rates were ~zero, no differential to harvest). **Sharpe +1.00 on the 2023–24 walk-forward** (rates had diverged). **Sharpe −0.01 out-of-sample** (2024–26): rates converged, the Aug-2024 yen carry unwind hit the short-JPY leg, skew **−1.12**. |
 
 | **NFP straddle** | On every NFP release, OCO stop orders around the pre-release 30-min box (+$0.50), $30 stop, flat 20:00 UTC, 0.01 lot. 212 events. | capture the direction of the NFP break and ride the documented post-spike continuation | **MARGINAL — the only non-negative result.** Beats the random-direction null ~10× (in-sample 2009–2022 **+$1.79/trade, PF 1.47, t = 1.87**, positive in both halves, 13/18 years green). But: the $30 stop hits only 13/212 (it's really "ride to the close with a disaster stop"); slippage-bound — in-sample edge falls to **+$0.85/trade, PF 1.20** at $0.50 adverse fill, and NFP is the worst moment for retail fills; ~**2%/yr at minimum lot** vs a 12% drawdown; a take-profit *hurts*; the strong 2023–26 numbers are partly a fixed-$ artifact of gold's price doubling. **Not deployable alone** — at best a tiny satellite overlay after paper-trading live NFP fills. Full write-up: `research/NFP_STRADDLE_RESULT.md`. |
+| **H8** | Macro-conditioned gold: sign(−Δ20d real yield DFII10, −Δ20d broad dollar DTWEXBGS), monthly | real yields and the dollar drive gold | **KILL.** Driver correlations are real and strengthening (−0.24→−0.49 real yield, −0.31→−0.46 dollar) but **contemporaneous, no lead-lag**. Strategy loses both windows (in-sample Sharpe −0.12, walk-forward −1.07) — gold decoupled from yield *level* on 2023–24 central-bank buying. Macro *explains* gold, doesn't *forecast* it. |
+| **H9 / H9b / H9c / H9d** | The "5 EMA" fade (Subasish Pani): candle fully detached from EMA5 (5-min) → stop order at its extreme, NY window 13:00–20:00 UTC, one trade/day. Four brackets tried on the same signal: H9 fixed $5/$10 (1:2); H9b candle's-own-range stop, 1:2; H9c fixed $5/$15 (1:3); H9d $5 stop + trail $5 once +1R, no fixed target. | a candle stretching away from its short EMA signals exhaustion; fade it | **KILL (all four), but the strongest raw directional signal in the project.** Every version beats the random-direction null at high significance (t = +2.5 to +2.8 vs null, p ≤ 0.02) — the fade direction is genuinely non-random. But every version is net negative in-sample: fixed $5/$10 −$0.17/trade (PF 0.93); candle-range stop **made it worse** (−$0.20 to −$0.30, the "widen the stop" idea backfires — median risk too small, cost dominates); fixed $5/$15 improved it to −$0.16 and flipped both out-of-sample windows positive; **best result: $5 stop + trail** landed in-sample at statistical breakeven (**t = −0.96, p = 0.335**, PF 0.96) with 2023 walk-forward outright profitable (+$88, PF 1.13). **Operator decision: accept as "still no," do not deploy or paper-trade further** — four iterations on one family is the limit before a result this close to zero risks being noise, not signal. |
+| **H10** | 200-EMA tap: 15-min bars, EMA200. Downtrend context (close < EMA200) + candle taps up into the line → sell at its low (symmetric long mirror); candle-range stop, 1:2 target; one trade/day, 24h. | pullbacks to a long moving average in a trend get rejected — trade the rejection | **KILL, cleanly, two ways.** (1) **No real signal** — Welch t = +0.61 vs the null (p = 0.541), the direction choice is statistically a coin flip, unlike the 5-EMA line. (2) **The $1,000 account gets wiped** — cumulative losses cross −$1,000 by early 2024 and the engine's ruin guard correctly stops opening new trades; this is the headline result, not a bug. Win rate 34% sits right at the 33% breakeven a 1:2 payoff needs, so it's pure noise plus cost. No further iteration — there is no real signal underneath to fix. |
 
 The walk-forward diagnostic (`research/WF_DIAGNOSTIC_RESULT.md`) confirmed trend
 also fails on 2023–24 and **loses to buy-and-hold** even there.
@@ -153,13 +159,19 @@ also fails on 2023–24 and **loses to buy-and-hold** even there.
 
 **No systematic strategy in the space that could be tested — intraday price
 patterns, single- and multi-asset time-series trend, technical indicators, FX
-carry, macro-conditioned gold — robustly clears even the recalibrated bar on data
-it was not fitted to, at retail costs.** The closest thing to an exception, an
-NFP-release breakout straddle, beats its random-direction null and is positive
-in-sample across both halves, but its edge is ~$1–2 per trade (≈ 2%/yr at minimum
-lot), it nearly evaporates under realistic NFP slippage, and its t-stat sits just
-under the significance bar — a candidate for a tiny satellite overlay after live
-forward-testing, not a fundable standalone edge.
+carry, macro-conditioned gold, moving-average pullback/fade setups — robustly
+clears even the recalibrated bar on data it was not fitted to, at retail costs.**
+Two threads came closest, and both were declined on purpose rather than by
+default. The **NFP-release breakout straddle** beats its random-direction null
+and is positive in-sample across both halves, but its edge is ~$1–2 per trade
+(≈2%/yr at minimum lot) and nearly evaporates under realistic NFP slippage. The
+**5-EMA fade** (H9–H9d) produced the single strongest raw directional signal in
+the whole project (t up to +2.8 vs its null, p ≤ 0.02 — the direction is
+genuinely non-random) — but every bracket tried, including one designed
+specifically to let winners run, landed at or below statistical breakeven after
+real cost. Both are evidence that gold has faint, real, exploitable-*looking*
+structure at retail scale — and that structure is consistently smaller than
+what it costs to collect it.
 
 This is a **negative result, and the process produced it on purpose.** Roughly ten
 strategies looked good in some window; none survived honest validation. The
@@ -209,6 +221,11 @@ research/                   M3 — one script + one RESULT.md per hypothesis
   INDICATOR_SCREEN_*  WF_DIAGNOSTIC_*  H7_CARRY_*  H8_MACRO_*
   NFP_STUDY_RESULT.md      descriptive NFP behaviour study (+ nfp_days.csv)
   nfp_straddle.py  NFP_STRADDLE_RESULT.md  nfp_straddle_trades.csv
+  h9_5ema.py  H9_5EMA_RESULT.md                      5-EMA fade, fixed $5/$10 (1:2)
+  h9b_5ema_1r2r.py  H9b_5EMA_1R2R_RESULT.md           5-EMA fade, candle-range stop, 1:2
+  H9c_5EMA_1R3_RESULT.md (h9_5ema.py --tgt-d 15)      5-EMA fade, fixed $5/$15 (1:3)
+  h9d_5ema_trail.py  H9d_5EMA_TRAIL_RESULT.md         5-EMA fade, $5 stop + trail
+  h10_ema200_tap.py  H10_EMA200_TAP_RESULT.md         200-EMA tap/reject, kill + ruin
   basket/                   14 daily-bar instruments (Dukascopy)
   carry/rates_3m.csv        7-currency 3-month interbank rates (FRED)
   macro/gold_drivers.csv    10y real yield + broad dollar (FRED)
