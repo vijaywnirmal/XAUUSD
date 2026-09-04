@@ -41,21 +41,33 @@ def build(df):
     return df, first_open
 
 
-def run_one(df, entry_idx, seed, slip):
+def run_one(df, entry_idx, seed, slip, stop_d=None, tgt_d=None):
     rng = np.random.default_rng(seed)
     n = len(df)
     le = np.zeros(n, bool)
     se = np.zeros(n, bool)
+    sd = np.full(n, np.nan)
+    td = np.full(n, np.nan)
     flips = rng.random(len(entry_idx)) < 0.5
     for j, is_long in zip(entry_idx, flips):
-        # engine fills a market entry at bar i on le[i-1]/se[i-1]
+        # engine fills a market entry at bar i on le[i-1]/se[i-1], reading
+        # stop_dist/target_dist from that same bar (i-1)
         k = max(j - 1, 0)
         (le if is_long else se)[k] = True
+        if stop_d is not None:
+            sd[k] = stop_d
+        if tgt_d is not None:
+            td[k] = tgt_d
     cfg = BTConfig(session_flat_hour_utc=FLAT_HOUR, one_trade_per_day=True,
                    allow_short=True, reverse_on_opposite=False,
                    size_mode="fixed", size_lots=0.01, slippage_ticks=slip,
                    initial_equity=1000.0)
-    res = Backtester(cfg).run(df, {"long_entry": le, "short_entry": se})
+    sig = {"long_entry": le, "short_entry": se}
+    if stop_d is not None:
+        sig["stop_dist"] = sd
+    if tgt_d is not None:
+        sig["target_dist"] = td
+    res = Backtester(cfg).run(df, sig)
     return res["trades"]
 
 
@@ -66,17 +78,21 @@ def main():
     ap.add_argument("--slip", type=float, default=SLIP_TICKS)
     ap.add_argument("--tf", default="5min")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--stop-d", type=float, default=None, help="fixed $ stop-loss (e.g. 5)")
+    ap.add_argument("--tgt-d", type=float, default=None, help="fixed $ take-profit (e.g. 10)")
     args = ap.parse_args()
 
     df_all = load_bars(args.tf, allow_oos=True,
                        columns=["ts", "open", "high", "low", "close", "spread_mean"])
     df, entry_idx = build(df_all)
+    bracket = (f"SL ${args.stop_d:g} / TP ${args.tgt_d:g}"
+               if args.stop_d or args.tgt_d else "no SL/TP")
     print(f"{len(entry_idx)} NY-open coin flips available, 2009-2026, "
-          f"0.01 lot, no SL/TP, flat {FLAT_HOUR}:00 UTC, {args.slip}-tick slip\n")
+          f"0.01 lot, {bracket}, flat {FLAT_HOUR}:00 UTC (backstop), {args.slip}-tick slip\n")
 
     finals, maxdds, nets_per_trade, ntrades = [], [], [], []
     for s in range(args.seed0, args.seed0 + args.seeds):
-        tr = run_one(df, entry_idx, s, args.slip)
+        tr = run_one(df, entry_idx, s, args.slip, stop_d=args.stop_d, tgt_d=args.tgt_d)
         net = tr["net_pnl"]
         eq = 1000 + net.cumsum()
         finals.append(eq.iloc[-1] if len(eq) else 1000.0)

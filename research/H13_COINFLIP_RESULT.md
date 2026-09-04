@@ -56,3 +56,44 @@ real, tested signal to overcome the guaranteed −$0.64/trade cost drag, and
 (b) a stop-loss on every single entry, no exceptions.
 
 Not a strategy candidate — an illustration, run once as asked.
+
+---
+
+## Follow-up: same coin flip, with a $5 stop / $10 target (1:2)
+
+**Run:** 2026-09-04. `python -m research.h13_coinflip_ny_open --stop-d 5 --tgt-d 10`.
+Identical setup, but every flip now carries a **fixed $5 stop-loss and $10
+take-profit** (the session-flat 20:00 UTC becomes a backstop for the rare
+trade that hits neither). 300 seeds again.
+
+| | no SL/TP | **$5 SL / $10 TP** |
+|---|---|---|
+| Paths ending below $1,000 | 100% | 100% |
+| Paths that never hit $0 equity | 0% | **1.0%** |
+| Trades survived before ruin | mean 45% of 4,568 | mean **63%** of 4,568 |
+| Worst drawdown | −$1,806 | **−$1,187** |
+| Mean per-trade net | −$0.64 | **−$0.38** |
+
+**Still ruins essentially every time (99–100%), just more slowly and less
+violently.** Bounding the risk per trade helps exactly the way it's supposed
+to: the worst-case drawdown shrinks by a third, and the account survives
+roughly 40% more trades on average before running out. But it doesn't change
+the outcome, because the two things that guarantee ruin are still both
+present:
+
+- **The direction is still a coin flip** — nothing about adding a bracket
+  gives the entry any real information. With a 1:2 payoff, breakeven needs
+  a 33% win rate; a fair, undirected coin against a symmetric-ish price
+  process lands almost exactly there (win rate observed ≈33%, gross P&L
+  ≈breakeven) — as it should, sanity-checking the engine.
+- **Cost is still there and still adds up.** −$0.38/trade × ~4,500 available
+  trades is still a ~$1,700 bill on a $1,000 account. A stop-loss caps how
+  much *one* trade can lose; it does nothing about the fact that *every*
+  trade has a small guaranteed cost and there's no edge to pay it back with.
+
+**The lesson a stop-loss actually teaches here:** it converts "the account
+can be wiped by a single bad session" into "the account bleeds out slowly,
+predictably, at the rate of transaction cost" — a real improvement in *how*
+you lose, not *whether* you lose. Turning that into *not losing* still
+requires an actual edge, which a coin doesn't have and never will.
+
