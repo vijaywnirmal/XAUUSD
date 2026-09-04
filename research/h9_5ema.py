@@ -37,7 +37,7 @@ FLAT_HOUR = 21
 SLIP_TICKS = 1.0
 
 
-def build(df):
+def build(df, stop_d_val=STOP_D, tgt_d_val=TGT_D):
     df = df.sort_values("ts").reset_index(drop=True)
     df["tmin"] = df["ts"].dt.hour * 60 + df["ts"].dt.minute
     ema = df["close"].ewm(span=EMA_N, adjust=False).mean().to_numpy()
@@ -56,8 +56,8 @@ def build(df):
     for i in range(1, n):
         if not (WIN_START <= tmin[i] < WIN_END):
             continue
-        stop_d[i] = STOP_D
-        tgt_d[i] = TGT_D
+        stop_d[i] = stop_d_val
+        tgt_d[i] = tgt_d_val
         if det_above[i - 1]:
             s_stop[i] = lo[i - 1]
         elif det_below[i - 1]:
@@ -67,8 +67,8 @@ def build(df):
     return df, sig
 
 
-def null_signals(df, real_trades, seed=0):
-    """Same entry bars as the real run, random side, same $5/$10 bracket."""
+def null_signals(df, real_trades, seed=0, stop_d_val=STOP_D, tgt_d_val=TGT_D):
+    """Same entry bars as the real run, random side, same bracket."""
     n = len(df)
     le = np.zeros(n, bool)
     se = np.zeros(n, bool)
@@ -79,8 +79,8 @@ def null_signals(df, real_trades, seed=0):
         j = max(int(ei) - 1, 0)
         (le if rng.random() < 0.5 else se)[j] = True
         for k in (j, min(j + 1, n - 1)):
-            stop_d[k] = STOP_D
-            tgt_d[k] = TGT_D
+            stop_d[k] = stop_d_val
+            tgt_d[k] = tgt_d_val
     return {"long_entry": le, "short_entry": se,
             "stop_dist": stop_d, "target_dist": tgt_d}
 
@@ -106,11 +106,13 @@ def main():
     ap.add_argument("--slip", type=float, default=SLIP_TICKS)
     ap.add_argument("--null", action="store_true")
     ap.add_argument("--tf", default="5min")
+    ap.add_argument("--stop-d", type=float, default=STOP_D)
+    ap.add_argument("--tgt-d", type=float, default=TGT_D)
     args = ap.parse_args()
 
     df_all = load_bars(args.tf, allow_oos=True,
                        columns=["ts", "open", "high", "low", "close", "spread_mean"])
-    df, sig = build(df_all)
+    df, sig = build(df_all, stop_d_val=args.stop_d, tgt_d_val=args.tgt_d)
 
     cfg = BTConfig(session_flat_hour_utc=FLAT_HOUR, one_trade_per_day=True,
                    allow_short=True, reverse_on_opposite=False,
@@ -120,13 +122,14 @@ def main():
     tr = res["trades"].copy()
     tr["year"] = pd.to_datetime(tr["entry_ts"]).dt.year
 
-    print(f"=== H9  5-EMA fade  |  $5 stop / $10 target  |  1 trade/day  |  "
-          f"NY 13:00-20:00 UTC  |  {args.slip}-tick slip ===")
+    rr = args.tgt_d / args.stop_d
+    print(f"=== H9  5-EMA fade  |  ${args.stop_d:g} stop / ${args.tgt_d:g} target (1:{rr:g})  |  "
+          f"1 trade/day  |  NY 13:00-20:00 UTC  |  {args.slip}-tick slip ===")
     print(f"    {len(tr)} trades over {tr['year'].min()}-{tr['year'].max()}\n")
 
     null_net = None
     if args.null:
-        nres = Backtester(cfg).run(df, null_signals(df, tr))
+        nres = Backtester(cfg).run(df, null_signals(df, tr, stop_d_val=args.stop_d, tgt_d_val=args.tgt_d))
         nt = nres["trades"]
         null_net = nt["net_pnl"]
         summarise(nt, "NULL (random dir)")
@@ -154,8 +157,10 @@ def main():
     for y, r in by.iterrows():
         print(f"    {int(y)}  {int(r['size']):3d}  {r['sum']:+8.1f}  {r['mean']:+6.2f}")
 
-    tr.to_csv("research/h9_5ema_trades.csv", index=False)
-    print("\nwrote research/h9_5ema_trades.csv")
+    tag = f"_sl{args.stop_d:g}_tp{args.tgt_d:g}" if (args.stop_d, args.tgt_d) != (STOP_D, TGT_D) else ""
+    out = f"research/h9_5ema_trades{tag}.csv"
+    tr.to_csv(out, index=False)
+    print(f"\nwrote {out}")
 
 
 if __name__ == "__main__":
