@@ -5,7 +5,9 @@
 small ($100–1,000) Vantage Raw ECN account, with **capital preservation** (shallow,
 short drawdowns) as the defining priority.
 **Outcome:** no deployable edge found. A rigorous negative result, plus reusable
-infrastructure and a documented research trail.
+infrastructure and a documented research trail. The one marginal exception — an
+NFP-release breakout straddle — beats its null but is too small and too
+slippage-fragile to fund (see §2).
 
 ---
 
@@ -39,10 +41,11 @@ infrastructure and a documented research trail.
 ### M3 — Research scripts (`research/`)
 
 `h1.py`, `h1b.py`, `h2.py`, `h3.py`, `h5.py`, `h5_forensics.py`, `h6.py`,
-`fetch_basket.py`, `h7_carry.py`, `indicator_screen.py`, `wf_diagnostic.py` — plus
-one `H*_RESULT.md` write-up per hypothesis, and the `basket/` (14 daily-bar
-instruments) and `carry/rates_3m.csv` (7-currency 3-month rates, from FRED)
-datasets.
+`fetch_basket.py`, `h7_carry.py`, `h8_macro.py`, `indicator_screen.py`,
+`wf_diagnostic.py`, `nfp_study.py`, `nfp_straddle.py` — plus one `H*_RESULT.md` /
+`*_RESULT.md` write-up per hypothesis, and the `basket/` (14 daily-bar
+instruments), `carry/rates_3m.csv` (7-currency 3-month rates, from FRED) and
+`macro/gold_drivers.csv` (real yield + broad dollar, from FRED) datasets.
 
 ---
 
@@ -55,12 +58,14 @@ datasets.
 | **H3** | Asian-quiet → NY range expansion (quiet Asian night → two-sided straddle) | volatility contraction precedes expansion (NR7 / squeeze) | **KILL.** Mechanism runs **backwards** — a quiet Asian night is followed by a *smaller* NY range (0.89 vs 1.01 ATR). Gold intraday vol *persists*; the quiet filter was counter-productive. |
 | **H4** | Turn-of-month drift | calendar-locked rebalancing flows | **Not run.** Feasibility: window drift +26 bps but p ≈ 0.09–0.19; day-of-week ANOVA p = 0.36. Skipped by choice. |
 | — | Short-horizon reversion (fade > 2.5 σ 5-min moves) | overreaction reverses | **Dead.** −0.13 bps over 5 min (≈ 1/10 of cost), noise thereafter. |
-| — | NFP-day behaviour | scheduled macro shock | **Empty.** ~2× volatility (not tradeable), no pre-drift, no significant post-move edge. |
+| — | NFP-day behaviour (descriptive study) | scheduled macro shock | **Mostly empty.** ~2× volatility (stable across 17 yrs), direction unpredictable, no pre-drift. One weak signal: the knee-jerk move *continues* to the session close (t = 2.24), not reverses. |
 | **H5** | Daily long/short vol-targeted trend on gold (3m + 12m sign blend) | time-series momentum — under-reaction + flow feedback | **KILL.** A *real* edge — beat buy-and-hold **+65 % vs +1 %**, drawdown **28 % vs 45 %**, profit factor 1.58, beat the random-sign null. But Sharpe only **0.32** after costs, a **3.6-year** drawdown, and **all the edge is 2009–2015** (2016–2022 flat). |
 | — | H5 + "trade only good environments" filter | learn the winners' regime, gate to it | **KILL.** Winners concentrated in low-vol entries. A fitted gate improved in-sample (Sharpe 0.32 → 0.40, DD 28 % → 18 %) and made the **walk-forward worse** (0.65 → 0.57). An unfitted threshold did nothing. Textbook overfit. |
 | **H6** | 14-instrument trend book (metals, FX, indices, energy) — vol-targeted portfolio | trend is a *cross-asset* premium; diversification lifts Sharpe | **KILL.** Sharpe **0.19** — *worse* than gold alone. Not a correlation (ρ = 0.17) or concentration failure. The **trend premium was absent industry-wide 2011–2020** ("CTA winter"). The equal-weight buy-and-hold basket lost 27 % in-sample. |
 | — | 19 classic indicator rules (SMA/EMA cross, RSI, MACD, Bollinger, Donchian, Stochastic, ADX, CCI, Keltner, Ichimoku, Connors RSI2), default params | technical analysis | **KILL.** In-sample **and** walk-forward: **none** beat buy-and-hold *and* survive Bonferroni multiple-testing correction. Top rules differ between windows = noise. Buy-and-hold beat almost every rule after costs. |
 | **H7** | G7 FX carry (rank EUR/GBP/JPY/AUD/NZD/CAD by rate vs USD; long high-carry, short low-carry) | the carry risk premium | **KILL.** Dead 2009–2022 (Sharpe −0.05 — G7 rates were ~zero, no differential to harvest). **Sharpe +1.00 on the 2023–24 walk-forward** (rates had diverged). **Sharpe −0.01 out-of-sample** (2024–26): rates converged, the Aug-2024 yen carry unwind hit the short-JPY leg, skew **−1.12**. |
+
+| **NFP straddle** | On every NFP release, OCO stop orders around the pre-release 30-min box (+$0.50), $30 stop, flat 20:00 UTC, 0.01 lot. 212 events. | capture the direction of the NFP break and ride the documented post-spike continuation | **MARGINAL — the only non-negative result.** Beats the random-direction null ~10× (in-sample 2009–2022 **+$1.79/trade, PF 1.47, t = 1.87**, positive in both halves, 13/18 years green). But: the $30 stop hits only 13/212 (it's really "ride to the close with a disaster stop"); slippage-bound — in-sample edge falls to **+$0.85/trade, PF 1.20** at $0.50 adverse fill, and NFP is the worst moment for retail fills; ~**2%/yr at minimum lot** vs a 12% drawdown; a take-profit *hurts*; the strong 2023–26 numbers are partly a fixed-$ artifact of gold's price doubling. **Not deployable alone** — at best a tiny satellite overlay after paper-trading live NFP fills. Full write-up: `research/NFP_STRADDLE_RESULT.md`. |
 
 The walk-forward diagnostic (`research/WF_DIAGNOSTIC_RESULT.md`) confirmed trend
 also fails on 2023–24 and **loses to buy-and-hold** even there.
@@ -148,8 +153,13 @@ also fails on 2023–24 and **loses to buy-and-hold** even there.
 
 **No systematic strategy in the space that could be tested — intraday price
 patterns, single- and multi-asset time-series trend, technical indicators, FX
-carry — robustly clears even the recalibrated bar on data it was not fitted to,
-at retail costs.**
+carry, macro-conditioned gold — robustly clears even the recalibrated bar on data
+it was not fitted to, at retail costs.** The closest thing to an exception, an
+NFP-release breakout straddle, beats its random-direction null and is positive
+in-sample across both halves, but its edge is ~$1–2 per trade (≈ 2%/yr at minimum
+lot), it nearly evaporates under realistic NFP slippage, and its t-stat sits just
+under the significance bar — a candidate for a tiny satellite overlay after live
+forward-testing, not a fundable standalone edge.
 
 This is a **negative result, and the process produced it on purpose.** Roughly ten
 strategies looked good in some window; none survived honest validation. The
@@ -196,7 +206,10 @@ backtest/                   M2 — engine, metrics, strategies, tests
 
 research/                   M3 — one script + one RESULT.md per hypothesis
   H1_*  H1b_*  H2_*  H3_*  H4_*  H5_*  H5_FORENSICS_*  H6_*
-  INDICATOR_SCREEN_*  WF_DIAGNOSTIC_*  H7_CARRY_*
+  INDICATOR_SCREEN_*  WF_DIAGNOSTIC_*  H7_CARRY_*  H8_MACRO_*
+  NFP_STUDY_RESULT.md      descriptive NFP behaviour study (+ nfp_days.csv)
+  nfp_straddle.py  NFP_STRADDLE_RESULT.md  nfp_straddle_trades.csv
   basket/                   14 daily-bar instruments (Dukascopy)
   carry/rates_3m.csv        7-currency 3-month interbank rates (FRED)
+  macro/gold_drivers.csv    10y real yield + broad dollar (FRED)
 ```
