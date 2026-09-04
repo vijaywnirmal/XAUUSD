@@ -63,7 +63,7 @@ def attach_htf_trend(df5, tf=HTF_TF, ema_n=HTF_EMA_N):
     return merged["ema200_htf"].to_numpy()
 
 
-def build(df5):
+def build(df5, counter_trend=False):
     df5 = df5.sort_values("ts").reset_index(drop=True)
     df5["tmin"] = df5["ts"].dt.hour * 60 + df5["ts"].dt.minute
     ema5 = df5["close"].ewm(span=EMA_N, adjust=False).mean().to_numpy()
@@ -77,8 +77,14 @@ def build(df5):
 
     det_above = lo > ema5          # short setup
     det_below = hi < ema5          # long setup
-    downtrend = cl < ema200_htf
-    uptrend = cl > ema200_htf
+    below_htf = cl < ema200_htf
+    above_htf = cl > ema200_htf
+    if counter_trend:
+        # OPPOSITE of H9e: only take the fade when it DISAGREES with the
+        # 15-min 200-EMA trend (pure counter-trend, no HTF backing at all).
+        downtrend, uptrend = above_htf, below_htf
+    else:
+        downtrend, uptrend = below_htf, above_htf
 
     l_stop = np.full(n, np.nan)
     s_stop = np.full(n, np.nan)
@@ -131,11 +137,13 @@ def main():
     ap.add_argument("--slip", type=float, default=SLIP_TICKS)
     ap.add_argument("--null", action="store_true")
     ap.add_argument("--tf", default="5min")
+    ap.add_argument("--counter-trend", action="store_true",
+                     help="opposite of the base rule: take the fade only when it DISAGREES with the HTF trend")
     args = ap.parse_args()
 
     df5 = load_bars(args.tf, allow_oos=True,
                     columns=["ts", "open", "high", "low", "close", "spread_mean"])
-    df, sig, counts = build(df5)
+    df, sig, counts = build(df5, counter_trend=args.counter_trend)
 
     cfg = BTConfig(session_flat_hour_utc=FLAT_HOUR, one_trade_per_day=True,
                    allow_short=True, reverse_on_opposite=False,
@@ -146,7 +154,8 @@ def main():
     tr = res["trades"].copy()
     tr["year"] = pd.to_datetime(tr["entry_ts"]).dt.year
 
-    print(f"=== H9e  5-EMA fade + 15-min 200-EMA trend confirmation  |  "
+    mode = "COUNTER-trend (opposite of H9e)" if args.counter_trend else "trend-confirmed (H9e)"
+    print(f"=== H9{'f' if args.counter_trend else 'e'}  5-EMA fade + 15-min 200-EMA, {mode}  |  "
           f"$5 stop, trail $5 @ +1R  |  1 trade/day  |  NY 13:00-20:00 UTC  |  "
           f"{args.slip}-tick slip ===")
     print(f"    raw setups: {counts['raw_short']} short, {counts['raw_long']} long")
@@ -188,8 +197,10 @@ def main():
     for y, r in by.iterrows():
         print(f"    {int(y)}  {int(r['size']):3d}  {r['sum']:+8.1f}  {r['mean']:+6.2f}")
 
-    tr.to_csv("research/h9e_5ema_trend_confirm_trades.csv", index=False)
-    print("\nwrote research/h9e_5ema_trend_confirm_trades.csv")
+    out = ("research/h9f_5ema_counter_trend_trades.csv" if args.counter_trend
+           else "research/h9e_5ema_trend_confirm_trades.csv")
+    tr.to_csv(out, index=False)
+    print(f"\nwrote {out}")
 
 
 if __name__ == "__main__":
