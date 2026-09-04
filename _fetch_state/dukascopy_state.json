@@ -1,0 +1,10 @@
+{
+  "mt5_patch_2020-02": {
+    "source": "dukascopy",
+    "bid_ticks": 4658190,
+    "ask_ticks": 4658190,
+    "patched_at": "2026-09-03T20:38:15.111012+00:00"
+  },
+  "updated_at": "2026-09-04T08:19:19.514786+00:00",
+  "last_completed_month": "2026-09"
+}

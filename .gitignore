@@ -1,0 +1,40 @@
+# --- large regenerable data (NOT committed) ---
+# regenerate with:  python download_dukascopy_ticks.py --start 2009-01-01
+#                   python -m data_pipeline.build_canonical
+#                   python -m data_pipeline.build_bars
+/canonical/
+/dukascopy/
+/bars/
+/data/
+/ask/
+/bid/
+
+# fetcher logs & locks (the small *.json state files ARE committed)
+_fetch_state/*.out
+_fetch_state/*.lock
+_fetch_state/*.txt
+_fetch_state/*.sh
+_fetch_state/*.cmd
+
+# run logs / scratch output
+*_run.out
+qa_*.out
+qa_offsets_run.out
+research/*_run.out
+*.output
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ipynb_checkpoints/
+
+# editor / OS / tooling
+.claude/
+.vscode/
+.idea/
+tool-results/
+.DS_Store
+Thumbs.db
+*.tmp
