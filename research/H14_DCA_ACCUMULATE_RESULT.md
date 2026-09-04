@@ -68,6 +68,42 @@ isn't a subtle backtest flaw — the equity curve going negative *is* the
 result: a strategy whose own accounting shows it goes bust cannot be rescued
 by whatever happens afterward.
 
+## Follow-up: same plan, $1,000/month cash instead of $100
+
+**Run:** `python -m research.h14_dca_accumulate --cash-per-month 1000`. Same
+0.01 lot/month, never sold — only the separate cash top-up changes, from $100
+to $1,000/month.
+
+| | $100/month cash | **$1,000/month cash** |
+|---|---|---|
+| Cash contributed | $21,300 | $213,000 |
+| Final equity | $605,989 | **$797,689** |
+| Return on cash contributed | +2,745% | +274.5% |
+| **Lowest equity ever reached** | **−$13,317 (negative — bust)** | **$999.74 (never negative)** |
+| Leverage at the end (notional / cash in) | 44.8× | **4.5×** |
+
+**This is the whole story: the position (0.01 lot/month, notional exposure,
+gold's price path) is identical in both runs — nothing about the trade
+itself changed.** What changed is the size of the cash cushion sitting under
+it. At $100/month, the cushion was too thin to absorb the 2011–2015 gold
+correction on top of a growing position, and equity went bust. At
+$1,000/month, the same drawdown against the same position barely dents an
+account that's 10× better funded — **equity never dips below its starting
+$1,000, even at the worst point of the whole 17-year run.**
+
+The lower *percentage* return (+274% vs the eye-popping +2,745%) is the
+correct trade-off, not a downside: it's what "not being over-leveraged"
+costs you when the bet happens to pay off. The $100/month version's higher
+percentage return was only available to an account that, in reality, would
+never have survived to collect it.
+
+**Practical read:** the 0.01-lot-per-month sizing is fine, or even
+conservative, *if* your monthly cash contribution is large enough relative
+to it — roughly $1,000/month is enough of a buffer for this position size
+across the worst drawdown this dataset contains; $100/month is not, by a
+wide margin. The real lever here was never the lot size — it was whether the
+funding pace kept up with the leverage being built.
+
 ## The thing that actually works: unleveraged dollar-cost-averaging
 
 For contrast, if the $100/month had instead simply **bought $100 of gold**

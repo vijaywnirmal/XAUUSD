@@ -25,13 +25,14 @@ cheap to show alongside as the natural benchmark.
 
     python -m research.h14_dca_accumulate
 """
+import argparse
 import numpy as np
 import pandas as pd
 
 from data_pipeline.dataset import load_bars
 
 LOT_PER_MONTH = 0.01
-CASH_PER_MONTH = 100.0
+CASH_PER_MONTH = 100.0     # overridden by --cash-per-month
 CONTRACT_SIZE = 100.0
 COMMISSION_ROUNDTRIP_PER_LOT = 6.0
 TICK_SIZE = 0.01
@@ -45,13 +46,20 @@ def monthly_entries(df):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cash-per-month", type=float, default=CASH_PER_MONTH)
+    ap.add_argument("--lot-per-month", type=float, default=LOT_PER_MONTH)
+    args = ap.parse_args()
+    cash_per_month = args.cash_per_month
+    lot_per_month = args.lot_per_month
+
     df = load_bars("15min", allow_oos=True,
                    columns=["ts", "open", "high", "low", "close", "spread_mean"])
     months = monthly_entries(df)
     last_price = df["close"].iloc[-1]
     last_ts = df["ts"].iloc[-1]
 
-    # --- literal spec: fixed 0.01 lot/month (CFD), $100 cash added separately ---
+    # --- literal spec: fixed lot/month (CFD), cash added separately ---
     cash_added = 0.0
     cost_paid = 0.0
     lots = 0.0
@@ -59,12 +67,12 @@ def main():
     rows = []
     for _, r in months.iterrows():
         price = r["open"]
-        entry_cost = (r["spread_mean"] / 2) * LOT_PER_MONTH * CONTRACT_SIZE \
-            + (COMMISSION_ROUNDTRIP_PER_LOT / 2) * LOT_PER_MONTH
-        cash_added += CASH_PER_MONTH
+        entry_cost = (r["spread_mean"] / 2) * lot_per_month * CONTRACT_SIZE \
+            + (COMMISSION_ROUNDTRIP_PER_LOT / 2) * lot_per_month
+        cash_added += cash_per_month
         cost_paid += entry_cost
-        lots += LOT_PER_MONTH
-        basis_notional += LOT_PER_MONTH * CONTRACT_SIZE * price
+        lots += lot_per_month
+        basis_notional += lot_per_month * CONTRACT_SIZE * price
         notional_now = lots * CONTRACT_SIZE * price
         unrl = notional_now - basis_notional
         equity = cash_added - cost_paid + unrl
@@ -79,7 +87,7 @@ def main():
     final_equity = eq["cash_added"].iloc[-1] - cost_paid + final_unrl
     n_months = len(months)
 
-    print(f"=== H14  0.01 lot/month (never sold) + $100 cash/month, separate ===")
+    print(f"=== H14  {lot_per_month:g} lot/month (never sold) + ${cash_per_month:g} cash/month, separate ===")
     print(f"  {n_months} months, {months['ts'].iloc[0].date()} -> {last_ts.date()}")
     print(f"  gold price: {months['open'].iloc[0]:.0f} -> {last_price:.0f}  "
           f"({(last_price/months['open'].iloc[0]-1)*100:+.0f}%)\n")
@@ -101,15 +109,15 @@ def main():
         print(f"    {y}  equity=${last['equity']:9,.0f}  notional=${last['notional']:10,.0f}  "
               f"cash_in=${last['cash_added']:7,.0f}  lots={last['lots']:.2f}")
 
-    # --- contrast: $100/month actually buys gold (unleveraged DCA) ---
+    # --- contrast: cash/month actually buys gold (unleveraged DCA) ---
     oz = 0.0
     cash_in2 = 0.0
     for _, r in months.iterrows():
         price = r["open"]
-        oz += CASH_PER_MONTH / price
-        cash_in2 += CASH_PER_MONTH
+        oz += cash_per_month / price
+        cash_in2 += cash_per_month
     final_value2 = oz * last_price
-    print(f"\n  --- for contrast: if the $100/month bought gold directly (unleveraged DCA) ---")
+    print(f"\n  --- for contrast: if the ${cash_per_month:g}/month bought gold directly (unleveraged DCA) ---")
     print(f"  cash contributed: ${cash_in2:,.0f}   oz bought: {oz:.2f}   "
           f"final value: ${final_value2:,.0f}   return: {(final_value2/cash_in2-1)*100:+.1f}%")
 
