@@ -31,15 +31,21 @@ download_*_ticks.py, verify_sources.py   data fetchers / cross-check
 
 ## Data is not in the repo
 
-`canonical/`, `dukascopy/`, `bars/` (~34 GB of tick/bar data) are gitignored.
-Regenerate:
+**Data lives in Postgres** (the `xauusd` db — tables `bars_1min/5min/15min/30min/1h`
+and `ticks_bid/ticks_ask`). `data_pipeline.dataset.load_bars(tf, split=…)` reads
+it directly, with the frozen splits + OOS touch-once guard. The parquet stores
+(`canonical/`, `dukascopy/`, `bars/`) were the original build/migration source
+and have been retired.
+
+Rebuild a derived bar timeframe from the tick archive:
 
 ```bash
-python download_dukascopy_ticks.py --start 2009-01-01     # ~hours; ~16 GB
-python -m data_pipeline.build_canonical                   # -> ./canonical/
-python -m data_pipeline.build_bars                        # -> ./bars/
-python -m data_pipeline.qa_report                         # -> ./qa/
+python -m data_pipeline.build_bars_pg --tf 30min,1h       # -> Postgres bars_<tf>
 ```
+
+Historical acquisition pipeline (source parquet no longer present, kept for
+reference): `download_dukascopy_ticks.py` -> `data_pipeline.build_canonical`
+-> `data_pipeline.build_bars` -> `db.migrate` (parquet -> Postgres).
 
 ## Environment
 

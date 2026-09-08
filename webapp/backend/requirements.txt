@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+pydantic
+pandas
+numpy
+scipy
+reportlab
+matplotlib
+pyarrow
+psycopg2-binary
+anthropic
+python-dotenv
+requests
+scikit-learn

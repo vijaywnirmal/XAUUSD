@@ -68,6 +68,8 @@ class Trade:
     mae: float                # max adverse excursion, price
     mfe: float                # max favourable excursion, price
     exit_reason: str
+    stop_lvl: float = float("nan")   # stop price in effect at exit (nan if none), for charting
+    tgt_lvl: float = float("nan")    # target price in effect at exit (nan if none), for charting
 
 
 def _round_lots(x, step, lo):
@@ -151,6 +153,7 @@ class Backtester:
                 bars_held=i - entry_i, gross_pnl=gross, cost=cost, net_pnl=net,
                 r_multiple=(net / risk_usd if risk_usd and not np.isnan(risk_usd) else np.nan),
                 mae=mae, mfe=mfe, exit_reason=reason,
+                stop_lvl=stop_lvl, tgt_lvl=tgt_lvl,
             ))
             pos = 0
             entry_i = -1

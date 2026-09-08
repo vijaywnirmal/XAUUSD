@@ -30,6 +30,17 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
+# secrets
+.env
+webapp/backend/.env
+
+# webapp build artifacts + runtime state
+webapp/frontend/tsconfig.tsbuildinfo
+webapp/backend/data/
+
+# livebot runtime logs (status.json, decisions.jsonl, trades.csv, market.csv)
+livebot/logs/
+
 # editor / OS / tooling
 .claude/
 .vscode/

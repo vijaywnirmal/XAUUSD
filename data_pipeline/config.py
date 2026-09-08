@@ -47,7 +47,12 @@ OUTLIER_REVERT_TICKS = 5        # a spike that reverts within N ticks is removed
 MAX_SPREAD_MULT = 25.0          # drop quotes wider than N x the month's median spread
 
 # --- bar timeframes ------------------------------------------------------------
-BAR_TIMEFRAMES = ("1min", "5min", "15min")
+# 1min/5min/15min are built by build_bars.py from canonical/ tick parquet (the
+# original M1 pipeline). 30min/1h are built by build_bars_pg.py, aggregated
+# directly from the Postgres tick archive (ticks_bid/ticks_ask) instead, since
+# dukascopy/ and canonical/ were deleted once their contents were verified
+# migrated row-for-row into Postgres — same OHLC/spread/volume semantics.
+BAR_TIMEFRAMES = ("1min", "5min", "15min", "30min", "1h")
 
 # --- data splits (frozen) ----------------------------------------------------
 # Extended vs the original blueprint: in-sample now starts at the Dukascopy
