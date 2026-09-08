@@ -56,6 +56,20 @@ interface Snapshot {
 
 const f2 = (x: number | null | undefined, d = 2) =>
   x === null || x === undefined || Number.isNaN(x) ? '—' : x.toFixed(d)
+const pct = (x: number | null | undefined, d = 0) =>
+  x === null || x === undefined || Number.isNaN(x) ? '—' : `${(x * 100).toFixed(d)}%`
+const convWord = (c: number | null | undefined) =>
+  c == null ? '—' : c < 0.08 ? 'very low' : c < 0.18 ? 'low' : c < 0.35 ? 'moderate' : 'high'
+
+// technical feature key -> plain name
+const FEAT: Record<string, string> = {
+  ret_1h: 'move over last hour', ret_1d: 'move over last day',
+  trend: 'trend direction (−2…+2)', ema_f_gap: 'distance above/below 20-bar avg',
+  rsi: 'RSI (overbought >70 / oversold <30)', macd_hist: 'MACD momentum',
+  atr_pct: 'how volatile vs history (0–1)', range_pos: 'position in 24h range (0=low, 1=high)',
+  streak: 'up/down bar streak', london_drift_atr: 'London-session drift so far',
+  ny_box_width_atr: 'NY opening-range width', ny_box_pos: 'position in the NY opening range',
+}
 
 export default function MonitorPanel() {
   const [s, setS] = useState<Snapshot | null>(null)
@@ -87,19 +101,24 @@ export default function MonitorPanel() {
       <div className="rule-builder">
         <div className="section-title">
           <span><Radar size={16} style={{ verticalAlign: -3 }} /> Real-time monitor</span>
-          <span className="muted" style={{ fontSize: 12 }}>features · patterns · direction lean · news</span>
+          <span className="muted" style={{ fontSize: 12 }}>updates every few seconds · read-only</span>
         </div>
         {err && <p className="error">{err}</p>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <CircleDot size={14} color={s?.running ? '#12b76a' : '#f04438'} />
-          <strong>{s?.running ? 'running' : 'not running'}</strong>
+          <strong>{s?.running ? 'live' : 'not running'}</strong>
           <span className="muted">
-            {s?.age_seconds != null ? `updated ${s.age_seconds}s ago` : ''}
-            {s?.session ? ` · ${s.session} session` : ''}
-            {s?.price ? ` · ${f2(s.price)} · spread $${f2(s.spread, 3)}` : ''}
+            {s?.age_seconds != null ? `last update ${s.age_seconds}s ago` : ''}
+            {s?.session ? ` · ${s.session} trading session` : ''}
+            {s?.price ? ` · gold ${f2(s.price)} · dealer spread $${f2(s.spread, 3)}` : ''}
           </span>
         </div>
         {!s?.running && <p className="muted">{s?.detail || 'Start it:'} <code>python -m monitor</code></p>}
+        <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Reads the market, runs a few models, and gives a plain go / no-go call. The models are
+          weak on purpose — a coin toss is 50%; these land in the mid-50s at best, and only on the
+          small share of moments they're confident. Treat it as a nudge, not a signal.
+        </p>
       </div>
 
       {/* --- composite read --- */}
@@ -107,7 +126,7 @@ export default function MonitorPanel() {
         <div className="rule-builder" style={{
           borderLeft: `4px solid ${cal?.blackout ? '#f04438' : s.read.tradeable ? '#12b76a' : '#98a2b3'}`,
         }}>
-          <div className="section-title"><span>Read</span></div>
+          <div className="section-title"><span>Bottom line</span></div>
           <p style={{ fontSize: 16, fontWeight: 600, margin: '2px 0 8px' }}>
             {cal?.blackout && <AlertTriangle size={16} color="#f04438" style={{ verticalAlign: -3 }} />}{' '}
             {s.read.verdict}
@@ -121,45 +140,51 @@ export default function MonitorPanel() {
         borderLeft: `4px solid ${s?.meta?.act ? '#12b76a' : '#98a2b3'}`,
       }}>
         <div className="section-title">
-          <span>Meta-label — should we act?</span>
-          {s?.live_auc?.available && (
-            <span className="muted" style={{ fontSize: 12 }}>
-              live: {s.live_auc.n_resolved} resolved
-            </span>
-          )}
+          <span>Confidence filter — trade or skip?</span>
+          <span className="muted" style={{ fontSize: 12 }}>a.k.a. the meta-model</span>
         </div>
         {!s?.meta?.available ? (
           <p className="muted">{s?.meta?.detail || 'run python -m monitor.calibrate'}</p>
         ) : (
           <>
             <p style={{ fontSize: 15, fontWeight: 600, margin: '2px 0 6px' }}>
-              {s.meta.recommendation}
+              {s.meta.act
+                ? `Confident enough — lean ${s.meta.primary_side?.toUpperCase()}`
+                : 'Not confident enough — no trade'}
             </p>
             <p className="muted" style={{ fontSize: 13 }}>
-              P(direction call correct) <strong>{f2(s.meta.p_correct, 3)}</strong> vs
-              threshold {f2(s.meta.threshold, 2)} · primary side {s.meta.primary_side}
-              {' '}(P_dir {f2(s.meta.p_dir, 3)})
+              This checks whether the direction call is trustworthy right now.
+              It's <strong>{pct(s.meta.p_correct)}</strong> sure the “{s.meta.primary_side}” call is right
+              (it needs {pct(s.meta.threshold)} to say “go”). The raw model itself leans
+              {' '}{s.meta.primary_side} at {pct(s.meta.p_dir)}.
             </p>
-            {s?.live_auc?.available ? (
-              <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                <strong>Live so far:</strong> direction hit {f2(s.live_auc.direction_live_hit, 3)}
-                {s.live_auc.direction_live_auc != null && ` (AUC ${f2(s.live_auc.direction_live_auc, 3)})`}
-                {s.live_auc.meta_selected_hit != null &&
-                  ` · meta-selected hit ${f2(s.live_auc.meta_selected_hit, 3)} (n=${s.live_auc.meta_selected_n})`}
-                {s.live_auc.london_live_auc != null && ` · London AUC ${f2(s.live_auc.london_live_auc, 3)}`}
-              </p>
-            ) : (
-              <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                {s?.live_auc?.detail || 'live accuracy accumulates as the monitor runs'}
-              </p>
-            )}
+            <div style={{ borderTop: '1px solid var(--border,#eee)', marginTop: 8, paddingTop: 8 }}>
+              <strong style={{ fontSize: 13 }}>Live scorecard</strong>
+              {s?.live_auc?.available ? (
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  {s.live_auc.n_resolved} calls checked so far ·
+                  {' '}all direction calls right <strong>{pct(s.live_auc.direction_live_hit)}</strong> of the time
+                  {s.live_auc.meta_selected_hit != null &&
+                    ` · filtered (high-confidence) calls right ${pct(s.live_auc.meta_selected_hit)} (${s.live_auc.meta_selected_n} of them)`}
+                  {' '}— 50% is a coin toss.
+                </p>
+              ) : (
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  {s?.live_auc?.detail || 'builds up as the monitor runs'} · each call is graded ~1h later against
+                  what price actually did. Give it a few hours of market time.
+                </p>
+              )}
+            </div>
           </>
         )}
       </div>
 
       {/* --- direction lean --- */}
       <div className="rule-builder">
-        <div className="section-title"><span>Direction lean ({dir?.horizon || '~1h'})</span></div>
+        <div className="section-title">
+          <span>Where's price headed in the next hour?</span>
+          <span className="muted" style={{ fontSize: 12 }}>the raw direction model</span>
+        </div>
         {!dir?.available ? (
           <p className="muted">{dir?.detail || 'No model — run python -m monitor.calibrate'}</p>
         ) : (
@@ -171,7 +196,10 @@ export default function MonitorPanel() {
               }}>
                 {(pUp * 100).toFixed(1)}%
               </span>
-              <span className="muted">P(up) · lean <strong>{dir.lean}</strong> · confidence {f2(dir.confidence, 2)}</span>
+              <span className="muted">
+                chance price is <strong>higher</strong> in ~1h · leaning <strong>{dir.lean}</strong> ·
+                {' '}conviction {convWord(dir.confidence)}
+              </span>
             </div>
             <div style={{ height: 8, borderRadius: 4, background: '#eee', margin: '8px 0', position: 'relative' }}>
               <div style={{
@@ -181,23 +209,26 @@ export default function MonitorPanel() {
               <div style={{ position: 'absolute', left: '50%', top: 0, width: 1, height: 8, background: '#bbb' }} />
             </div>
             <p className="muted" style={{ fontSize: 12 }}>
-              drivers now: {(dir.top_drivers || []).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(' · ')}
+              what's pushing the call: {(dir.top_drivers || []).map(([k, v]) =>
+                `${FEAT[k] || k} ${v >= 0 ? '↑' : '↓'}`).join(' · ')}
             </p>
             <p style={{ fontSize: 12, fontWeight: 600, color: dir.trust_now ? '#12b76a' : '#98a2b3' }}>
-              {dir.session} session · OOS AUC {f2(dir.session_auc, 3)} ·{' '}
-              {dir.trust_now ? 'worth reading here' : 'not reliable now — ignore the lean'}
+              {dir.trust_now
+                ? `In the ${dir.session} session this model is ${pct(dir.session_auc)} accurate on unseen data — worth a look.`
+                : `In the ${dir.session} session it's only ${pct(dir.session_auc)} accurate on unseen data — basically a coin toss, ignore the guess.`}
             </p>
-            <p className="muted" style={{ fontSize: 12, color: '#b54708' }}>{dir.caveat}</p>
           </>
         )}
       </div>
 
       {/* --- London continuation model --- */}
       {s?.london?.available && (
-        <div className="rule-builder">
+        <div className="rule-builder" style={{ opacity: s.london.reliable ? 1 : 0.75 }}>
           <div className="section-title">
-            <span>London model (13:00→17:00 UTC)</span>
-            <span className="muted" style={{ fontSize: 12 }}>OOS AUC {f2(s.london.oos_auc, 3)}</span>
+            <span>London-session model (the 1pm→5pm UTC move)</span>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {pct(s.london.oos_auc)} accurate on unseen data
+            </span>
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
             <span style={{
@@ -206,39 +237,48 @@ export default function MonitorPanel() {
             }}>
               {((s.london.p_up ?? 0.5) * 100).toFixed(1)}%
             </span>
-            <span className="muted">P(up) · lean {s.london.lean}</span>
-            {s.london.at_decision_time && (
+            <span className="muted">chance the afternoon move is up · leaning {s.london.lean}</span>
+            {s.london.at_decision_time && s.london.reliable && (
               <span style={{ background: '#ecfdf3', color: '#027a48', border: '1px solid #a6f4c5',
                 borderRadius: 6, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>
                 DECISION TIME
               </span>
             )}
           </div>
-          <p style={{ fontSize: 12, color: s.london.reliable ? undefined : '#b42318', fontWeight: s.london.reliable ? 400 : 600 }}>{s.london.note}</p>
+          <p style={{ fontSize: 12, color: s.london.reliable ? undefined : '#b42318', fontWeight: s.london.reliable ? 400 : 600 }}>
+            {s.london.reliable ? s.london.note
+              : `This idea didn't pan out — on data it never saw it was right only ${pct(s.london.oos_auc)} of the time (worse than a coin toss). Left visible for honesty; don't act on it.`}
+          </p>
         </div>
       )}
 
       {/* --- volatility regime --- */}
       <div className="rule-builder">
-        <div className="section-title"><span>Volatility regime ({vol?.detail ? '' : '~1h'})</span></div>
+        <div className="section-title">
+          <span>How wild will the next hour be?</span>
+          <span className="muted" style={{ fontSize: 12 }}>quiet / normal / wild</span>
+        </div>
         {!vol?.available ? (
           <p className="muted">{vol?.detail || 'No vol model — run python -m monitor.calibrate'}</p>
         ) : (
           <>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
               <span style={{ fontSize: 24, fontWeight: 700, color: regClr[vol.regime || 'normal'] }}>
-                {(vol.regime || '—').toUpperCase()}
+                {vol.regime === 'explosive' ? 'WILD' : (vol.regime || '—').toUpperCase()}
               </span>
               <span className="muted">
-                ~{f2(vol.rv_pred_bps, 0)} bps predicted 1σ move
-                {vol.percentile != null ? ` · ${(vol.percentile * 100).toFixed(0)}th pct` : ''}
+                expect a move of roughly <strong>{f2((vol.rv_pred_bps ?? 0) / 100, 2)}%</strong> either way
+                {vol.percentile != null ? ` · bigger than ${(vol.percentile * 100).toFixed(0)}% of hours` : ''}
               </span>
             </div>
-            <p className="muted" style={{ fontSize: 12 }}>{vol.note}</p>
+            <p className="muted" style={{ fontSize: 12 }}>
+              The quiet/normal/wild call is right about {pct(vol.tercile_acc_oos)} of the time on unseen data
+              (a random guess would be 33%). The exact % move is a rough estimate.
+            </p>
             {ev && (ev.ev_mins_to ?? 9e9) < 240 && (
               <p style={{ fontSize: 12, color: '#b54708' }}>
-                {ev.next_kind || 'event'} in {f2(ev.ev_mins_to, 0)} min (weight {ev.ev_next_weight})
-                {ev.ev_window60 ? ' — inside the ±60 min window' : ''}
+                {ev.next_kind || 'a scheduled event'} in {f2(ev.ev_mins_to, 0)} min
+                {ev.ev_window60 ? ' — within the hour, expect a jump' : ''}
               </p>
             )}
           </>
@@ -248,9 +288,15 @@ export default function MonitorPanel() {
       {/* --- patterns --- */}
       <div className="rule-builder">
         <div className="section-title">
-          <span>Patterns</span>
-          <span className="muted">net lean {s?.pattern_lean != null ? (s.pattern_lean > 0 ? `+${s.pattern_lean}` : s.pattern_lean) : '—'}</span>
+          <span>Chart patterns</span>
+          <span className="muted" style={{ fontSize: 12 }}>
+            combined: {s?.pattern_lean == null ? '—' : s.pattern_lean > 0 ? 'bullish' : s.pattern_lean < 0 ? 'bearish' : 'neutral'}
+          </span>
         </div>
+        <p className="muted" style={{ fontSize: 12, marginTop: -4, marginBottom: 6 }}>
+          Classic setups, each shown with what the project's own backtests found about it. Dim = not
+          firing right now. None of these beat costs on their own — they're context.
+        </p>
         <div style={{ display: 'grid', gap: 6 }}>
           {(s?.patterns || []).map((p) => (
             <div key={p.name} style={{ opacity: p.firing ? 1 : 0.4, fontSize: 13 }}>
@@ -277,10 +323,11 @@ export default function MonitorPanel() {
           </p>
         )}
         <p className="muted">
-          Next high-impact:{' '}
+          Next market-moving release:{' '}
           {cal?.next_high
             ? `${cal.next_high.title} (${cal.next_high.country}) in ${f2(cal.minutes_to_next_high, 0)} min`
             : '—'}
+          {' '}· the bot stands aside for 15 min either side of high-impact US news.
         </p>
         {(cal?.upcoming_24h || []).length > 0 && (
           <ul style={{ fontSize: 12, margin: '4px 0', paddingLeft: 18 }}>
@@ -292,29 +339,32 @@ export default function MonitorPanel() {
           </ul>
         )}
         <p className="muted" style={{ marginTop: 6 }}>
-          GDELT gold tone: {sent?.available ? (
+          News tone (gold coverage): {sent?.available ? (
             <>
-              <strong>{f2(sent.tone_now, 2)}</strong> (24h mean {f2(sent.tone_mean_24h, 2)}, z {f2(sent.tone_z, 2)})
-              {sent.vol_z != null && ` · coverage volume z ${f2(sent.vol_z, 2)}`}
+              <strong>{f2(sent.tone_now, 2)}</strong> now vs {f2(sent.tone_mean_24h, 2)} 24h-average
+              {sent.tone_z != null && ` — ${Math.abs(sent.tone_z) < 1 ? 'about normal' : sent.tone_z > 0 ? 'unusually positive' : 'unusually negative'}`}
             </>
-          ) : 'unavailable'}
+          ) : 'unavailable (rate-limited, retries automatically)'}
         </p>
       </div>
 
       {/* --- features --- */}
       <div className="rule-builder">
-        <div className="section-title"><span>Key features</span></div>
+        <div className="section-title">
+          <span>What the models are looking at</span>
+          <span className="muted" style={{ fontSize: 12 }}>raw inputs</span>
+        </div>
         {ca && (
           <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
-            cross-asset · USD 15m {f2(ca.xa_usd_15m, 5)} · 30m {f2(ca.xa_usd_30m, 5)} · 60m {f2(ca.xa_usd_60m, 5)}
-            {ca.xa_btc_60m != null && ` · BTC 60m ${f2(ca.xa_btc_60m, 4)}`}
-            {' '}(USD↑ ≈ gold headwind)
+            Dollar strength over the last hour: <strong>{ca.xa_usd_60m != null && ca.xa_usd_60m > 0 ? 'rising' : ca.xa_usd_60m != null ? 'falling' : '—'}</strong>
+            {' '}(a stronger dollar is usually a headwind for gold)
+            {ca.xa_btc_60m != null && ` · Bitcoin ${ca.xa_btc_60m > 0 ? 'up' : 'down'} ${f2(Math.abs(ca.xa_btc_60m) * 100, 1)}% (risk mood)`}
           </p>
         )}
-        <div className="param-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', fontSize: 13 }}>
+        <div className="param-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', fontSize: 13 }}>
           {Object.entries(s?.features || {}).map(([k, v]) => (
             <div key={k}>
-              <div className="muted" style={{ fontSize: 11 }}>{k}</div>
+              <div className="muted" style={{ fontSize: 11 }}>{FEAT[k] || k}</div>
               <div style={{ fontWeight: 600 }}>{typeof v === 'number' ? f2(v, 4) : '—'}</div>
             </div>
           ))}

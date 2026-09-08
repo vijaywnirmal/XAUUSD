@@ -171,10 +171,13 @@ def run(source):
                 vol = V.predict(feat)
                 pat_lean = P.net_lean(pats)
                 firing = [p for p in pats if p["firing"]]
-                # live-AUC bookkeeping
+                # live-AUC bookkeeping - only while the feed is actually moving
+                # (skip weekends / market-closed so flat prices don't pollute it)
+                feed_live = df["close"].tail(6).nunique() > 1
                 try:
-                    O.record(now, feat.get("price"), pred, meta_p, lon_p)
-                    O.resolve(now, feat.get("price"))
+                    if feed_live:
+                        O.record(now, feat.get("price"), pred, meta_p, lon_p)
+                        O.resolve(now, feat.get("price"))
                     la = O.live_auc()
                 except Exception:
                     la = {"available": False}
@@ -234,47 +237,59 @@ def run(source):
         source.shutdown()
 
 
+def _pct(x):
+    return f"{round(x * 100)}%" if isinstance(x, (int, float)) else "?"
+
+
 def _read(pred, meta_p, lon_p, vol, pat_lean, news_cal, feat) -> dict:
-    """Plain-English composite. The gate is now the META model: only 'tradeable'
-    when the meta-label says the direction call is likely correct AND there's no
-    news blackout AND vol isn't explosive. Patterns + session are context."""
+    """Plain-language composite for a non-quant reader. The go/no-go gate is the
+    confidence filter (meta model): only 'take a trade' when it's confident the
+    direction call is right, there's no news blackout, and swings aren't huge."""
     parts = []
     if news_cal.get("blackout"):
-        parts.append(f"NEWS BLACKOUT - {news_cal.get('blackout_reason')}. Stand aside.")
+        parts.append(f"News blackout — {news_cal.get('blackout_reason')}. Don't trade through it.")
     m2h = news_cal.get("minutes_to_next_high")
     if m2h is not None and 0 < m2h <= 60:
-        parts.append(f"High-impact event in {m2h:.0f} min "
-                     f"({(news_cal.get('next_high') or {}).get('title')}).")
+        parts.append(f"Big news due in {m2h:.0f} min ({(news_cal.get('next_high') or {}).get('title')}) "
+                     f"— expect a spike.")
 
-    lean = pred.get("lean", "n/a")
     if pred.get("available"):
-        parts.append(f"Direction P_up {pred['p_up']} ({pred.get('session')} session, "
-                     f"AUC {pred.get('session_auc')}).")
+        sess, sauc = pred.get("session"), pred.get("session_auc")
+        good = pred.get("trust_now")
+        parts.append(
+            f"Model sees about a {_pct(pred['p_up'])} chance price is higher in ~1 hour. "
+            f"In the {sess} session it's been {_pct(sauc)} accurate on unseen data — "
+            + ("usable here." if good else "basically a coin toss here, so ignore its guess."))
 
-    act = False
+    act = bool(meta_p.get("act"))
     if meta_p.get("available"):
-        act = bool(meta_p.get("act"))
-        parts.append(f"Meta-label: P(call correct) {meta_p.get('p_correct')} "
-                     f"(threshold {meta_p.get('threshold')}) -> {meta_p.get('recommendation')}.")
+        parts.append(
+            f"Confidence filter: {_pct(meta_p.get('p_correct'))} sure that direction call is right "
+            f"(needs {_pct(meta_p.get('threshold'))}) — "
+            + ("it says act on it." if act else "not confident enough, so skip."))
 
     if lon_p.get("available") and lon_p.get("at_decision_time") and lon_p.get("reliable"):
-        parts.append(f"LONDON model at decision time: lean {lon_p.get('lean')} "
-                     f"(P_up {lon_p.get('p_up')}, OOS AUC {lon_p.get('oos_auc')}) for 13:00-17:00 UTC.")
+        parts.append(f"London-session model (1pm→5pm UTC move): leans {lon_p.get('lean')}, "
+                     f"{_pct(lon_p.get('p_up'))} chance up.")
 
     reg = vol.get("regime")
     if vol.get("available"):
-        parts.append(f"Volatility regime: {reg} (~{vol.get('rv_pred_bps')} bps 1h).")
+        bps = vol.get("rv_pred_bps") or 0
+        parts.append(f"Next hour looks {reg} — expect a move of roughly {bps/100:.2f}% either way.")
         if reg == "explosive":
-            parts.append("Explosive vol - size down or stand aside.")
+            parts.append("Big swings likely — trade small or wait.")
+        elif reg == "quiet":
+            parts.append("Very calm — fade extremes rather than chase breakouts.")
 
     if pat_lean:
-        parts.append(f"Patterns net {'+' if pat_lean > 0 else ''}{pat_lean}.")
+        parts.append(f"Chart patterns lean {'bullish' if pat_lean > 0 else 'bearish'}.")
 
     tradeable = act and not news_cal.get("blackout") and reg != "explosive"
+    side = meta_p.get("primary_side", "?").upper()
     if tradeable:
-        verdict = f"take {meta_p.get('primary_side','?').upper()} - meta-label confident, no blackout, vol {reg}"
+        verdict = f"Lean {side} — filter is confident, no news blackout, volatility {reg}"
     elif news_cal.get("blackout") or reg == "explosive":
-        verdict = "stand aside"
+        verdict = "Stand aside"
     else:
-        verdict = "no conviction (meta-label below threshold)"
+        verdict = "No trade — not confident enough right now"
     return {"verdict": verdict, "notes": parts, "tradeable": tradeable}
