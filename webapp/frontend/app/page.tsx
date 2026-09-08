@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import {
   Activity,
+  Radar,
   BarChart3,
   Check,
   ChevronRight,
@@ -19,6 +20,7 @@ import ResultsPanel from '@/components/ResultsPanel'
 import ComparePanel from '@/components/ComparePanel'
 import StrategyBuilder from '@/components/StrategyBuilder'
 import LiveBotPanel from '@/components/LiveBotPanel'
+import MonitorPanel from '@/components/MonitorPanel'
 import {
   defaultsFrom,
   fetchIndicators,
@@ -30,7 +32,7 @@ import {
   type StrategyInfo,
 } from '@/lib/api'
 
-type Tab = 'Setup' | 'Results' | 'Compare' | 'LiveBot'
+type Tab = 'Setup' | 'Results' | 'Compare' | 'LiveBot' | 'Monitor'
 type CategoryFilter = 'all' | 'intraday' | 'daily-portfolio'
 
 const CAT_COLOR: Record<string, string> = {
@@ -153,6 +155,9 @@ export default function Page() {
           <button className={tab === 'LiveBot' ? 'side-link active' : 'side-link'} onClick={() => setTab('LiveBot')}>
             <Activity size={17} /><span>Live bot</span>
           </button>
+          <button className={tab === 'Monitor' ? 'side-link active' : 'side-link'} onClick={() => setTab('Monitor')}>
+            <Radar size={17} /><span>Monitor</span>
+          </button>
         </nav>
         <div className="sidebar-bottom">
           <p className="side-note">Gold research backtester. Data stays on this machine.</p>
@@ -164,7 +169,7 @@ export default function Page() {
           <div className="breadcrumbs">
             <span>Backtest</span>
             <ChevronRight size={14} />
-            <strong>{tab === 'Compare' ? 'Compare' : tab === 'LiveBot' ? 'Live bot' : selected?.name || (selectedId === 'custom' ? 'Strategy builder' : 'Setup')}</strong>
+            <strong>{tab === 'Compare' ? 'Compare' : tab === 'LiveBot' ? 'Live bot' : tab === 'Monitor' ? 'Monitor' : selected?.name || (selectedId === 'custom' ? 'Strategy builder' : 'Setup')}</strong>
           </div>
           <button className="theme-toggle" onClick={() => setDark((d) => !d)}>{dark ? 'Light mode' : 'Dark mode'}</button>
         </header>
@@ -172,12 +177,14 @@ export default function Page() {
         <section className="page-head">
           <div>
             <div className="eyebrow"><span className="status-dot" /> XAUUSD research</div>
-            <h1>{tab === 'Compare' ? 'Compare strategies' : tab === 'LiveBot' ? 'H1 execution bot' : 'Run a backtest'}</h1>
+            <h1>{tab === 'Compare' ? 'Compare strategies' : tab === 'LiveBot' ? 'H1 execution bot' : tab === 'Monitor' ? 'Real-time monitor' : 'Run a backtest'}</h1>
             <p>{tab === 'LiveBot'
               ? 'Live read-only view of the paper-trading H1 bot (livebot/). It runs as its own process.'
+              : tab === 'Monitor'
+              ? 'Live features, pattern rules, a faint direction lean, and news (ForexFactory calendar + GDELT tone). Read-only; runs as its own process.'
               : 'Re-run the project hypotheses with live parameters, then inspect equity, trades, and the success bar.'}</p>
           </div>
-          {tab !== 'Compare' && selectedId !== 'custom' && (
+          {tab !== 'Compare' && tab !== 'LiveBot' && tab !== 'Monitor' && selectedId !== 'custom' && (
             <div className="head-actions">
               <button className="primary-btn" disabled={running || !selected || oosBlocked} onClick={run}>
                 <Play size={15} fill="currentColor" /> {running ? 'Running…' : 'Run backtest'}
@@ -186,7 +193,7 @@ export default function Page() {
           )}
         </section>
 
-        <div className="tabs" role="tablist" style={{ display: tab === 'LiveBot' ? 'none' : undefined }}>
+        <div className="tabs" role="tablist" style={{ display: (tab === 'LiveBot' || tab === 'Monitor') ? 'none' : undefined }}>
           {(['Setup', 'Results', 'Compare'] as Tab[]).map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'tab active' : 'tab'} onClick={() => setTab(t)}>
               {t}
@@ -399,6 +406,9 @@ export default function Page() {
         </div>
         <div style={{ display: tab === 'LiveBot' ? undefined : 'none' }}>
           <LiveBotPanel />
+        </div>
+        <div style={{ display: tab === 'Monitor' ? undefined : 'none' }}>
+          <MonitorPanel />
         </div>
       </main>
     </div>

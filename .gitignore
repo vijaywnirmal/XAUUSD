@@ -40,6 +40,8 @@ webapp/backend/data/
 
 # livebot runtime logs (status.json, decisions.jsonl, trades.csv, market.csv)
 livebot/logs/
+# monitor runtime logs (snapshot.json, history.csv); model.json IS committed
+monitor/logs/
 
 # editor / OS / tooling
 .claude/

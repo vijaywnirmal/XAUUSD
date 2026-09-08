@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from webapp.backend import runner, export, builder, nl_parser, saved_strategies, livebot_monitor
+from webapp.backend import runner, export, builder, nl_parser, saved_strategies, livebot_monitor, monitor_view
 from webapp.backend.registry import STRATEGY_REGISTRY
 from webapp.backend.indicators import INDICATOR_REGISTRY
 from webapp.backend.jsonsafe import safe
@@ -219,6 +219,16 @@ def livebot_decisions(limit: int = 50):
 @app.get("/livebot/trades")
 def livebot_trades():
     return livebot_monitor.trades()
+
+
+@app.get("/monitor/snapshot")
+def monitor_snapshot():
+    return monitor_view.snapshot()
+
+
+@app.get("/monitor/history")
+def monitor_history(limit: int = 240):
+    return monitor_view.history(limit)
 
 
 @app.get("/run/{run_id}/detail")
