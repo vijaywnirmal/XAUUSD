@@ -28,6 +28,20 @@ interface Snapshot {
     ev_mins_to?: number; ev_next_weight?: number; ev_pre2h?: number; ev_window60?: number
     next_kind?: string | null; next_when_utc?: string | null
   }
+  meta?: {
+    available: boolean; p_dir?: number; primary_side?: string; p_correct?: number
+    threshold?: number; act?: boolean; recommendation?: string; detail?: string
+  }
+  london?: {
+    available: boolean; p_up?: number; lean?: string; at_decision_time?: boolean; reliable?: boolean
+    horizon?: string; top_drivers?: [string, number][]; oos_auc?: number; note?: string; detail?: string
+  }
+  cross_asset?: Record<string, number | null>
+  live_auc?: {
+    available: boolean; n_resolved?: number; direction_live_auc?: number | null
+    direction_live_hit?: number | null; meta_selected_hit?: number | null; meta_selected_n?: number
+    london_live_auc?: number | null; detail?: string; note?: string
+  }
   news_calendar?: {
     blackout?: boolean; blackout_reason?: string; minutes_to_next_high?: number | null
     next_high?: { title: string; country: string; when_utc: string } | null
@@ -62,6 +76,7 @@ export default function MonitorPanel() {
   const dir = s?.direction
   const vol = s?.volatility
   const ev = s?.event_proximity
+  const ca = s?.cross_asset
   const cal = s?.news_calendar
   const sent = s?.news_sentiment
   const pUp = dir?.p_up ?? 0.5
@@ -101,6 +116,47 @@ export default function MonitorPanel() {
         </div>
       )}
 
+      {/* --- meta-label (the gate) + live accuracy --- */}
+      <div className="rule-builder" style={{
+        borderLeft: `4px solid ${s?.meta?.act ? '#12b76a' : '#98a2b3'}`,
+      }}>
+        <div className="section-title">
+          <span>Meta-label — should we act?</span>
+          {s?.live_auc?.available && (
+            <span className="muted" style={{ fontSize: 12 }}>
+              live: {s.live_auc.n_resolved} resolved
+            </span>
+          )}
+        </div>
+        {!s?.meta?.available ? (
+          <p className="muted">{s?.meta?.detail || 'run python -m monitor.calibrate'}</p>
+        ) : (
+          <>
+            <p style={{ fontSize: 15, fontWeight: 600, margin: '2px 0 6px' }}>
+              {s.meta.recommendation}
+            </p>
+            <p className="muted" style={{ fontSize: 13 }}>
+              P(direction call correct) <strong>{f2(s.meta.p_correct, 3)}</strong> vs
+              threshold {f2(s.meta.threshold, 2)} · primary side {s.meta.primary_side}
+              {' '}(P_dir {f2(s.meta.p_dir, 3)})
+            </p>
+            {s?.live_auc?.available ? (
+              <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                <strong>Live so far:</strong> direction hit {f2(s.live_auc.direction_live_hit, 3)}
+                {s.live_auc.direction_live_auc != null && ` (AUC ${f2(s.live_auc.direction_live_auc, 3)})`}
+                {s.live_auc.meta_selected_hit != null &&
+                  ` · meta-selected hit ${f2(s.live_auc.meta_selected_hit, 3)} (n=${s.live_auc.meta_selected_n})`}
+                {s.live_auc.london_live_auc != null && ` · London AUC ${f2(s.live_auc.london_live_auc, 3)}`}
+              </p>
+            ) : (
+              <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                {s?.live_auc?.detail || 'live accuracy accumulates as the monitor runs'}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
       {/* --- direction lean --- */}
       <div className="rule-builder">
         <div className="section-title"><span>Direction lean ({dir?.horizon || '~1h'})</span></div>
@@ -135,6 +191,32 @@ export default function MonitorPanel() {
           </>
         )}
       </div>
+
+      {/* --- London continuation model --- */}
+      {s?.london?.available && (
+        <div className="rule-builder">
+          <div className="section-title">
+            <span>London model (13:00→17:00 UTC)</span>
+            <span className="muted" style={{ fontSize: 12 }}>OOS AUC {f2(s.london.oos_auc, 3)}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+            <span style={{
+              fontSize: 22, fontWeight: 700,
+              color: (s.london.p_up ?? 0.5) > 0.55 ? '#12b76a' : (s.london.p_up ?? 0.5) < 0.45 ? '#f04438' : '#475467',
+            }}>
+              {((s.london.p_up ?? 0.5) * 100).toFixed(1)}%
+            </span>
+            <span className="muted">P(up) · lean {s.london.lean}</span>
+            {s.london.at_decision_time && (
+              <span style={{ background: '#ecfdf3', color: '#027a48', border: '1px solid #a6f4c5',
+                borderRadius: 6, padding: '1px 7px', fontSize: 11, fontWeight: 600 }}>
+                DECISION TIME
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: 12, color: s.london.reliable ? undefined : '#b42318', fontWeight: s.london.reliable ? 400 : 600 }}>{s.london.note}</p>
+        </div>
+      )}
 
       {/* --- volatility regime --- */}
       <div className="rule-builder">
@@ -222,6 +304,13 @@ export default function MonitorPanel() {
       {/* --- features --- */}
       <div className="rule-builder">
         <div className="section-title"><span>Key features</span></div>
+        {ca && (
+          <p className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+            cross-asset · USD 15m {f2(ca.xa_usd_15m, 5)} · 30m {f2(ca.xa_usd_30m, 5)} · 60m {f2(ca.xa_usd_60m, 5)}
+            {ca.xa_btc_60m != null && ` · BTC 60m ${f2(ca.xa_btc_60m, 4)}`}
+            {' '}(USD↑ ≈ gold headwind)
+          </p>
+        )}
         <div className="param-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', fontSize: 13 }}>
           {Object.entries(s?.features || {}).map(([k, v]) => (
             <div key={k}>

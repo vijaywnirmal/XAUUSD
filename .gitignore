@@ -40,8 +40,10 @@ webapp/backend/data/
 
 # livebot runtime logs (status.json, decisions.jsonl, trades.csv, market.csv)
 livebot/logs/
-# monitor runtime logs (snapshot.json, history.csv); model.json IS committed
+# monitor runtime logs + regenerable artifacts; the *.json models ARE committed
 monitor/logs/
+monitor/data/
+monitor/meta_model.joblib
 
 # editor / OS / tooling
 .claude/

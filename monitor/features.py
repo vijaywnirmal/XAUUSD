@@ -44,7 +44,7 @@ def _session(mod: int) -> str:
     return "late"
 
 
-def feature_frame(df: pd.DataFrame) -> pd.DataFrame:
+def feature_frame(df: pd.DataFrame, xa: dict | None = None) -> pd.DataFrame:
     df = df.sort_values("ts").reset_index(drop=True)
     c = df["close"]
     ts = pd.DatetimeIndex(df["ts"])
@@ -115,19 +115,56 @@ def feature_frame(df: pd.DataFrame) -> pd.DataFrame:
     ev = event_features_frame(pd.DatetimeIndex(f["ts"]))
     for col in ev.columns:
         f[col] = ev[col].to_numpy()
+
+    # --- cross-asset (USD strength from EURUSD/USDJPY; risk from BTC) ---
+    xa_frame = _crossasset(pd.DatetimeIndex(df["ts"]), xa)
+    for col in XA_COLS:
+        f[col] = xa_frame[col].to_numpy() if col in xa_frame else np.nan
     return f
+
+
+def _crossasset(ts: pd.DatetimeIndex, xa: dict | None) -> pd.DataFrame:
+    """xa: {"EURUSD": df, "USDJPY": df, "BTCUSD"?: df} each with a 'close' column,
+    tz-aware M5 index. Returns USD-strength / risk deltas aligned to `ts`
+    (asof-backward, so no lookahead). Missing -> NaN columns."""
+    out = pd.DataFrame(index=ts, columns=XA_COLS, dtype=float)
+    if not xa:
+        return out
+    tsi = ts.tz_convert("UTC") if ts.tz is not None else ts.tz_localize("UTC")
+
+    def _series(sym):
+        d = xa.get(sym)
+        if d is None or len(d) == 0:
+            return None
+        s = d["close"] if "close" in d else d.iloc[:, 0]
+        s.index = pd.to_datetime(s.index, utc=True)
+        return s[~s.index.duplicated()].sort_index()
+
+    eur, jpy, btc = _series("EURUSD"), _series("USDJPY"), _series("BTCUSD")
+    if eur is not None and jpy is not None:
+        j = pd.concat([eur.rename("EUR"), jpy.rename("JPY")], axis=1).sort_index().ffill()
+        # USD strength: rises when EURUSD falls and USDJPY rises
+        usd = -np.log(j["EUR"]) * 0.6 + np.log(j["JPY"]) * 0.4
+        for n, lab in [(3, "15m"), (6, "30m"), (12, "60m")]:
+            out[f"xa_usd_{lab}"] = usd.diff(n).reindex(tsi, method="ffill").to_numpy()
+    if btc is not None:
+        out["xa_btc_60m"] = np.log(btc).diff(12).reindex(tsi, method="ffill").to_numpy()
+    return out
 
 
 # event-proximity columns (shared by both models)
 EVENT_COLS = ["ev_mins_to", "ev_mins_from", "ev_next_weight",
               "ev_pre2h", "ev_post2h", "ev_window60", "ev_imminent"]
 
+# cross-asset columns
+XA_COLS = ["xa_usd_15m", "xa_usd_30m", "xa_usd_60m", "xa_btc_60m"]
+
 # columns fed to the DIRECTION model
 MODEL_COLS = [
     "ret_15m", "ret_1h", "ret_1d", "ema_f_gap", "ema_s_gap", "trend",
     "atr_pct", "atr_norm", "rsi", "macd_hist", "range_pos", "streak",
     "dist_hi_atr", "dist_lo_atr", "london_drift_atr",
-] + EVENT_COLS
+] + EVENT_COLS + XA_COLS
 
 # columns fed to the VOLATILITY model (predict log realised vol of the next hour)
 VOL_COLS = [
@@ -135,9 +172,16 @@ VOL_COLS = [
     "ret_1h", "ema_f_gap", "streak", "dow",
 ] + EVENT_COLS
 
+# columns for the dedicated LONDON-continuation model (evaluated at ~13:00 UTC:
+# predict sign of the 13:00 -> 17:00 move). Uses Asia+London context.
+LONDON_COLS = [
+    "london_drift_atr", "ret_1h", "ret_1d", "ema_s_gap", "trend", "rsi",
+    "atr_pct", "range_pos", "dow", "xa_usd_60m", "xa_usd_30m",
+] + EVENT_COLS
 
-def compute(df: pd.DataFrame, tick=None) -> dict:
-    f = feature_frame(df)
+
+def compute(df: pd.DataFrame, tick=None, xa: dict | None = None) -> dict:
+    f = feature_frame(df, xa)
     row = f.iloc[-1].to_dict()
     if tick is not None:
         row["spread"] = round(getattr(tick, "spread", float("nan")), 4)

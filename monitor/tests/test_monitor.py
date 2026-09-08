@@ -10,6 +10,9 @@ from monitor import patterns as P
 from monitor import direction as D
 from monitor import vol_model as V
 from monitor import calendar_history as CH
+from monitor import meta as MET
+from monitor import london as LON
+from monitor import outcomes as OUT
 
 
 def _synth_bars(n=400, start="2025-06-10 08:00", drift=0.0, seed=1):
@@ -120,7 +123,46 @@ def test_vol_predict_contract():
 
 def test_feature_frame_has_new_cols():
     f = F.feature_frame(_synth_bars(360))
-    for c in F.EVENT_COLS + ["rv_1h", "rv_15m", "vol_seasonality"]:
+    for c in F.EVENT_COLS + F.XA_COLS + ["rv_1h", "rv_15m", "vol_seasonality"]:
         assert c in f.columns
     assert set(F.EVENT_COLS).issubset(set(F.MODEL_COLS))
-    assert set(F.EVENT_COLS).issubset(set(F.VOL_COLS))
+    assert set(F.XA_COLS).issubset(set(F.MODEL_COLS))
+
+
+def test_crossasset_join_no_lookahead():
+    import pandas as pd, numpy as np
+    ts = pd.date_range("2024-06-10 08:00", periods=200, freq="5min", tz="UTC")
+    eur = pd.DataFrame({"close": 1.08 + np.cumsum(np.random.default_rng(2).normal(0, 1e-4, 260))},
+                       index=pd.date_range("2024-06-10 06:00", periods=260, freq="5min", tz="UTC"))
+    jpy = pd.DataFrame({"close": 157 + np.cumsum(np.random.default_rng(3).normal(0, 1e-2, 260))},
+                       index=eur.index)
+    px = 2300 + np.cumsum(np.random.default_rng(1).normal(0, 1, 200))
+    df = pd.DataFrame({"ts": ts, "open": px, "high": px + .5, "low": px - .5, "close": px})
+    f = F.feature_frame(df, {"EURUSD": eur, "USDJPY": jpy})
+    assert f["xa_usd_60m"].notna().sum() > 100          # populated
+    assert f["xa_usd_60m"].abs().max() < 0.05            # sane magnitude
+
+
+def test_meta_and_london_contracts():
+    feat = F.compute(_synth_bars(340))
+    for out in (MET.predict(feat), LON.predict(feat)):
+        assert "available" in out
+    m = MET.predict(feat)
+    if m["available"]:
+        assert 0.0 <= m["p_correct"] <= 1.0 and isinstance(m["act"], bool)
+    l = LON.predict(feat)
+    if l["available"]:
+        assert 0.0 <= l["p_up"] <= 1.0 and "at_decision_time" in l
+
+
+def test_outcomes_record_resolve(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    monkeypatch.setattr(OUT, "_PEND", str(tmp_path / "pend.csv"))
+    monkeypatch.setattr(OUT, "_OUT", str(tmp_path / "out.csv"))
+    monkeypatch.setattr(OUT, "_HORIZON_MIN", 60)
+    t0 = datetime(2025, 6, 10, 12, 0, tzinfo=timezone.utc)
+    OUT.record(t0, 2000.0, {"p_up": 0.62}, {"p_correct": 0.6, "act": True}, {"p_up": 0.55, "at_decision_time": True})
+    assert OUT.resolve(t0 + timedelta(minutes=30), 2001.0) == 0        # not mature
+    assert OUT.resolve(t0 + timedelta(minutes=61), 2005.0) == 1        # matured, price up
+    rows = OUT._read(OUT._OUT, OUT._OF)
+    assert rows[0]["realised_up"] == "1" and rows[0]["dir_hit"] == "1"
