@@ -36,6 +36,10 @@ def predict(feat: dict) -> dict:
         drivers.append((name, round(contrib, 3)))
     p_up = 1.0 / (1.0 + math.exp(-z))
     drivers.sort(key=lambda t: -abs(t[1]))
+    sess = feat.get("session")
+    sauc = (m.get("session_auc") or {}).get(sess)
+    # the lean is only worth reading where the model actually has skill OOS
+    trust = sauc is not None and sauc >= 0.55
     return {
         "available": True,
         "p_up": round(p_up, 4),
@@ -44,6 +48,11 @@ def predict(feat: dict) -> dict:
         "horizon": f"~{m['horizon_bars'] * 5} min",
         "top_drivers": drivers[:5],
         "model_oos_auc": m.get("metrics", {}).get("oos_auc"),
-        "caveat": "logistic lean, OOS AUC "
-                  f"{m.get('metrics', {}).get('oos_auc')} - treat as a faint tilt, not a signal.",
+        "session": sess,
+        "session_auc": sauc,
+        "trust_now": bool(trust),
+        "caveat": (f"OOS AUC {m.get('metrics', {}).get('oos_auc')} overall; "
+                   + (f"{sauc} in the {sess} session - worth reading here."
+                      if trust else
+                      f"{sauc} in the {sess} session - NOT reliable now, ignore the lean.")),
     }

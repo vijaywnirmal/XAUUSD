@@ -8,6 +8,8 @@ from monitor import news_calendar as NC
 from monitor import features as F
 from monitor import patterns as P
 from monitor import direction as D
+from monitor import vol_model as V
+from monitor import calendar_history as CH
 
 
 def _synth_bars(n=400, start="2025-06-10 08:00", drift=0.0, seed=1):
@@ -87,3 +89,38 @@ def test_direction_predict_contract():
     if out["available"]:
         assert 0.0 <= out["p_up"] <= 1.0
         assert out["lean"] in ("up", "down", "neutral")
+        assert "trust_now" in out and "session_auc" in out
+
+
+# --- event proximity (calendar history) -----------------------------------
+def test_event_proximity_math():
+    import pandas as pd
+    # 2024-06-12 18:00 UTC is a hardcoded FOMC
+    t = pd.DatetimeIndex(["2024-06-12T16:30:00Z", "2024-06-12T18:10:00Z"])
+    ef = CH.event_features_frame(t)
+    r0, r1 = ef.iloc[0], ef.iloc[1]
+    assert abs(r0["ev_mins_to"] - 90) < 1 and r0["ev_next_weight"] == 3 and r0["ev_pre2h"] == 1
+    assert abs(r1["ev_mins_from"] - 10) < 1 and r1["ev_post2h"] == 1 and r1["ev_window60"] == 1
+
+
+def test_event_features_capped_far_out():
+    import pandas as pd
+    ef = CH.event_features_frame(pd.DatetimeIndex(["2024-07-04T00:00:00Z"]))  # US holiday, no event near
+    assert ef.iloc[0]["ev_mins_to"] <= 1440 and ef.iloc[0]["ev_mins_from"] <= 1440
+
+
+# --- volatility model -----------------------------------------------------
+def test_vol_predict_contract():
+    out = V.predict(F.compute(_synth_bars(340)))
+    assert "available" in out
+    if out["available"]:
+        assert out["regime"] in ("quiet", "normal", "explosive")
+        assert out["rv_pred_bps"] > 0
+
+
+def test_feature_frame_has_new_cols():
+    f = F.feature_frame(_synth_bars(360))
+    for c in F.EVENT_COLS + ["rv_1h", "rv_15m", "vol_seasonality"]:
+        assert c in f.columns
+    assert set(F.EVENT_COLS).issubset(set(F.MODEL_COLS))
+    assert set(F.EVENT_COLS).issubset(set(F.VOL_COLS))

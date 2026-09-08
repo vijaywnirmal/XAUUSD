@@ -98,15 +98,42 @@ def feature_frame(df: pd.DataFrame) -> pd.DataFrame:
     f["london_drift_atr"] = (lon_last - lon_open) / atr
     f["ny_box_width_atr"] = (box_hi - box_lo) / atr
     f["ny_box_pos"] = (c - box_lo) / (box_hi - box_lo).replace(0, np.nan)
+
+    # realised volatility of the last hour (sum of squared 5-min returns, ann.-free)
+    r5 = c.pct_change()
+    f["rv_1h"] = (r5.pow(2).rolling(12).sum()).pow(0.5)
+    f["rv_15m"] = (r5.pow(2).rolling(3).sum()).pow(0.5)
+
+    # intraday volatility seasonality: mean |ret| at this minute-of-day
+    # relative to the trailing ~20-day average |ret| (stable intraday shape)
+    absr = r5.abs()
+    seas = absr.groupby(mod).transform("mean")
+    f["vol_seasonality"] = seas / absr.rolling(288 * 20, min_periods=288).mean()
+
+    # --- news / event-proximity features (FOMC / NFP / CPI) ---
+    from monitor.calendar_history import event_features_frame
+    ev = event_features_frame(pd.DatetimeIndex(f["ts"]))
+    for col in ev.columns:
+        f[col] = ev[col].to_numpy()
     return f
 
 
-# columns fed to the direction model (numeric only)
+# event-proximity columns (shared by both models)
+EVENT_COLS = ["ev_mins_to", "ev_mins_from", "ev_next_weight",
+              "ev_pre2h", "ev_post2h", "ev_window60", "ev_imminent"]
+
+# columns fed to the DIRECTION model
 MODEL_COLS = [
     "ret_15m", "ret_1h", "ret_1d", "ema_f_gap", "ema_s_gap", "trend",
     "atr_pct", "atr_norm", "rsi", "macd_hist", "range_pos", "streak",
     "dist_hi_atr", "dist_lo_atr", "london_drift_atr",
-]
+] + EVENT_COLS
+
+# columns fed to the VOLATILITY model (predict log realised vol of the next hour)
+VOL_COLS = [
+    "rv_1h", "rv_15m", "atr_norm", "atr_pct", "vol_seasonality",
+    "ret_1h", "ema_f_gap", "streak", "dow",
+] + EVENT_COLS
 
 
 def compute(df: pd.DataFrame, tick=None) -> dict:

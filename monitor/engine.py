@@ -22,6 +22,7 @@ from monitor import config as C
 from monitor import features as F
 from monitor import patterns as P
 from monitor import direction as D
+from monitor import vol_model as V
 from monitor import news_calendar, news_sentiment
 
 os.makedirs(C.LOG_DIR, exist_ok=True)
@@ -138,9 +139,17 @@ def run(source):
                     news_sent = news_sentiment.summary()
                     last_news = time.time()
 
+                vol = V.predict(feat)
                 pat_lean = P.net_lean(pats)
                 firing = [p for p in pats if p["firing"]]
-                read = _read(pred, pat_lean, news_cal, feat)
+                read = _read(pred, vol, pat_lean, news_cal, feat)
+                ev = {k: feat.get(k) for k in F.EVENT_COLS}
+                ev["next_kind"] = None
+                try:
+                    from monitor.calendar_history import live_event_summary
+                    ev.update({k: live_event_summary(now)[k] for k in ("next_kind", "next_when_utc")})
+                except Exception:
+                    pass
 
                 snap = {
                     "ts": now.isoformat(timespec="seconds"),
@@ -154,6 +163,8 @@ def run(source):
                     "patterns": pats, "patterns_firing": [p["name"] for p in firing],
                     "pattern_lean": pat_lean,
                     "direction": pred,
+                    "volatility": vol,
+                    "event_proximity": ev,
                     "news_calendar": news_cal, "news_sentiment": news_sent,
                     "read": read,
                 }
@@ -162,12 +173,15 @@ def run(source):
                     "ts": snap["ts"], "price": snap["price"], "spread": snap["spread"],
                     "p_up": pred.get("p_up"), "lean": pred.get("lean"),
                     "confidence": pred.get("confidence"), "pattern_lean": pat_lean,
+                    "vol_regime": vol.get("regime"), "rv_pred_bps": vol.get("rv_pred_bps"),
+                    "vol_pct": vol.get("percentile"),
+                    "ev_mins_to": feat.get("ev_mins_to"), "ev_next_weight": feat.get("ev_next_weight"),
                     "blackout": news_cal.get("blackout"),
                     "min_to_high": news_cal.get("minutes_to_next_high"),
                     "tone_now": news_sent.get("tone_now"), "tone_z": news_sent.get("tone_z"),
-                    "vol_z": news_sent.get("vol_z"), "trend": feat.get("trend"),
-                    "rsi": feat.get("rsi"), "atr_pct": feat.get("atr_pct"),
-                    "range_pos": feat.get("range_pos"), "session": feat.get("session"),
+                    "trend": feat.get("trend"), "rsi": feat.get("rsi"),
+                    "atr_pct": feat.get("atr_pct"), "range_pos": feat.get("range_pos"),
+                    "session": feat.get("session"),
                 })
             except Exception:
                 traceback.print_exc()
@@ -177,23 +191,48 @@ def run(source):
         source.shutdown()
 
 
-def _read(pred, pat_lean, news_cal, feat) -> dict:
-    """A plain-English composite, deliberately conservative."""
+def _read(pred, vol, pat_lean, news_cal, feat) -> dict:
+    """Plain-English composite. Deliberately conservative: only calls something
+    'tradeable' when there's no news blackout, the direction model is in a
+    session where it actually has OOS skill, it agrees with the patterns, and
+    the predicted volatility regime isn't explosive."""
     parts = []
     if news_cal.get("blackout"):
         parts.append(f"NEWS BLACKOUT - {news_cal.get('blackout_reason')}. Stand aside.")
     m2h = news_cal.get("minutes_to_next_high")
     if m2h is not None and 0 < m2h <= 60:
-        parts.append(f"High-impact event in {m2h:.0f} min ({news_cal.get('next_high', {}).get('title')}).")
+        parts.append(f"High-impact event in {m2h:.0f} min "
+                     f"({(news_cal.get('next_high') or {}).get('title')}).")
+
     lean = pred.get("lean", "n/a")
-    conf = pred.get("confidence")
+    conf = pred.get("confidence") or 0
+    trust = pred.get("trust_now", False)
     if pred.get("available"):
-        parts.append(f"Model lean {lean} (P_up {pred['p_up']}, conf {conf}, OOS AUC {pred.get('model_oos_auc')}).")
+        parts.append(f"Direction lean {lean} (P_up {pred['p_up']}, conf {conf}); "
+                     + (f"{pred.get('session')} session AUC {pred.get('session_auc')} - worth reading."
+                        if trust else
+                        f"{pred.get('session')} session AUC {pred.get('session_auc')} - ignore it here."))
+
+    reg = vol.get("regime")
+    if vol.get("available"):
+        parts.append(f"Volatility regime: {reg} (~{vol.get('rv_pred_bps')} bps 1h, "
+                     f"classifier ~{int((vol.get('tercile_acc_oos') or 0)*100)}% OOS).")
+        if reg == "explosive":
+            parts.append("Explosive vol expected - size down or stand aside.")
+        elif reg == "quiet":
+            parts.append("Quiet regime - mean-reversion setups favoured over breakouts.")
+
     if pat_lean:
         parts.append(f"Patterns net {'+' if pat_lean > 0 else ''}{pat_lean} "
-                     f"({'bullish' if pat_lean > 0 else 'bearish'} tilt).")
+                     f"({'bullish' if pat_lean > 0 else 'bearish'}).")
+
     agree = (lean == "up" and pat_lean > 0) or (lean == "down" and pat_lean < 0)
-    verdict = ("model and patterns AGREE" if agree and pat_lean and lean in ("up", "down")
-               else "mixed / no conviction")
-    return {"verdict": verdict, "notes": parts,
-            "tradeable": (not news_cal.get("blackout")) and agree and (conf or 0) >= 0.1}
+    tradeable = (not news_cal.get("blackout") and trust and agree
+                 and conf >= 0.1 and reg != "explosive")
+    if tradeable:
+        verdict = f"lean {lean.upper()} - model (trusted session) + patterns agree, vol {reg}"
+    elif news_cal.get("blackout") or reg == "explosive":
+        verdict = "stand aside"
+    else:
+        verdict = "no conviction"
+    return {"verdict": verdict, "notes": parts, "tradeable": tradeable}

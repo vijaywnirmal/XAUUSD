@@ -18,6 +18,15 @@ interface Snapshot {
   direction?: {
     available: boolean; p_up?: number; lean?: string; confidence?: number; horizon?: string
     top_drivers?: [string, number][]; model_oos_auc?: number; caveat?: string; detail?: string
+    session?: string; session_auc?: number | null; trust_now?: boolean
+  }
+  volatility?: {
+    available: boolean; rv_pred_bps?: number; regime?: string; percentile?: number | null
+    model_r2_oos?: number; tercile_acc_oos?: number; note?: string; detail?: string
+  }
+  event_proximity?: {
+    ev_mins_to?: number; ev_next_weight?: number; ev_pre2h?: number; ev_window60?: number
+    next_kind?: string | null; next_when_utc?: string | null
   }
   news_calendar?: {
     blackout?: boolean; blackout_reason?: string; minutes_to_next_high?: number | null
@@ -51,9 +60,12 @@ export default function MonitorPanel() {
   }, [])
 
   const dir = s?.direction
+  const vol = s?.volatility
+  const ev = s?.event_proximity
   const cal = s?.news_calendar
   const sent = s?.news_sentiment
   const pUp = dir?.p_up ?? 0.5
+  const regClr: Record<string, string> = { quiet: '#12b76a', normal: '#475467', explosive: '#f04438' }
 
   return (
     <div className="setup-main" style={{ display: 'grid', gap: 16 }}>
@@ -115,7 +127,38 @@ export default function MonitorPanel() {
             <p className="muted" style={{ fontSize: 12 }}>
               drivers now: {(dir.top_drivers || []).map(([k, v]) => `${k} ${v >= 0 ? '+' : ''}${v}`).join(' · ')}
             </p>
+            <p style={{ fontSize: 12, fontWeight: 600, color: dir.trust_now ? '#12b76a' : '#98a2b3' }}>
+              {dir.session} session · OOS AUC {f2(dir.session_auc, 3)} ·{' '}
+              {dir.trust_now ? 'worth reading here' : 'not reliable now — ignore the lean'}
+            </p>
             <p className="muted" style={{ fontSize: 12, color: '#b54708' }}>{dir.caveat}</p>
+          </>
+        )}
+      </div>
+
+      {/* --- volatility regime --- */}
+      <div className="rule-builder">
+        <div className="section-title"><span>Volatility regime ({vol?.detail ? '' : '~1h'})</span></div>
+        {!vol?.available ? (
+          <p className="muted">{vol?.detail || 'No vol model — run python -m monitor.calibrate'}</p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+              <span style={{ fontSize: 24, fontWeight: 700, color: regClr[vol.regime || 'normal'] }}>
+                {(vol.regime || '—').toUpperCase()}
+              </span>
+              <span className="muted">
+                ~{f2(vol.rv_pred_bps, 0)} bps predicted 1σ move
+                {vol.percentile != null ? ` · ${(vol.percentile * 100).toFixed(0)}th pct` : ''}
+              </span>
+            </div>
+            <p className="muted" style={{ fontSize: 12 }}>{vol.note}</p>
+            {ev && (ev.ev_mins_to ?? 9e9) < 240 && (
+              <p style={{ fontSize: 12, color: '#b54708' }}>
+                {ev.next_kind || 'event'} in {f2(ev.ev_mins_to, 0)} min (weight {ev.ev_next_weight})
+                {ev.ev_window60 ? ' — inside the ±60 min window' : ''}
+              </p>
+            )}
           </>
         )}
       </div>
