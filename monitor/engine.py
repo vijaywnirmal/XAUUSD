@@ -21,6 +21,7 @@ import pandas as pd
 from monitor import config as C
 from monitor import features as F
 from monitor import patterns as P
+from monitor import candles as CN
 from monitor import direction as D
 from monitor import vol_model as V
 from monitor import meta as M
@@ -159,6 +160,7 @@ def run(source):
                     last_xa = time.time()
                 feat = F.compute(df, tick, xa=xa)
                 pats = P.evaluate(df)
+                cands = CN.evaluate(df)
                 pred = D.predict(feat)
                 meta_p = M.predict(feat)
                 lon_p = L.predict(feat)
@@ -201,6 +203,7 @@ def run(source):
                                   "london_drift_atr", "ny_box_width_atr", "ny_box_pos"]},
                     "patterns": pats, "patterns_firing": [p["name"] for p in firing],
                     "pattern_lean": pat_lean,
+                    "candles": cands, "candle_lean": CN.net_lean(cands),
                     "direction": pred,
                     "meta": meta_p,
                     "london": lon_p,

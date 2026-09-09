@@ -15,6 +15,8 @@ interface Snapshot {
   patterns?: { name: string; firing: boolean; direction: number; note: string; detail: string }[]
   patterns_firing?: string[]
   pattern_lean?: number
+  candles?: { name: string; direction: number; note: string; detail: string }[]
+  candle_lean?: number
   direction?: {
     available: boolean; p_up?: number; lean?: string; confidence?: number; horizon?: string
     top_drivers?: [string, number][]; model_oos_auc?: number; caveat?: string; detail?: string
@@ -38,9 +40,13 @@ interface Snapshot {
   }
   cross_asset?: Record<string, number | null>
   live_auc?: {
-    available: boolean; n_resolved?: number; direction_live_auc?: number | null
-    direction_live_hit?: number | null; meta_selected_hit?: number | null; meta_selected_n?: number
-    london_live_auc?: number | null; detail?: string; note?: string
+    available: boolean; n?: number; n_resolved?: number; preliminary?: boolean
+    direction_hit?: number | null; direction_hit_n?: number
+    direction_hit_recent?: number | null; recent_n?: number
+    meta_selected_hit?: number | null; meta_selected_n?: number; meta_selected_hit_recent?: number | null
+    direction_auc?: number | null; direction_auc_note?: string | null
+    london_auc?: number | null; london_auc_n?: number
+    detail?: string; note?: string
   }
   news_calendar?: {
     blackout?: boolean; blackout_reason?: string; minutes_to_next_high?: number | null
@@ -159,19 +165,33 @@ export default function MonitorPanel() {
               {' '}{s.meta.primary_side} at {pct(s.meta.p_dir)}.
             </p>
             <div style={{ borderTop: '1px solid var(--border,#eee)', marginTop: 8, paddingTop: 8 }}>
-              <strong style={{ fontSize: 13 }}>Live scorecard</strong>
+              <strong style={{ fontSize: 13 }}>Live scorecard </strong>
+              {s?.live_auc?.available && s.live_auc.preliminary && (
+                <span style={{ background: '#fffaeb', color: '#b54708', border: '1px solid #fedf89',
+                  borderRadius: 6, padding: '1px 6px', fontSize: 11, fontWeight: 600 }}>
+                  PRELIMINARY
+                </span>
+              )}
               {s?.live_auc?.available ? (
                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                  {s.live_auc.n_resolved} calls checked so far ·
-                  {' '}all direction calls right <strong>{pct(s.live_auc.direction_live_hit)}</strong> of the time
+                  {s.live_auc.n_resolved} calls graded (each ~1h after it was made).{' '}
+                  Direction right <strong>{pct(s.live_auc.direction_hit)}</strong>
+                  {s.live_auc.direction_hit_recent != null && s.live_auc.recent_n
+                    ? ` overall, ${pct(s.live_auc.direction_hit_recent)} over the last ${s.live_auc.recent_n}`
+                    : ''}
+                  .
                   {s.live_auc.meta_selected_hit != null &&
-                    ` · filtered (high-confidence) calls right ${pct(s.live_auc.meta_selected_hit)} (${s.live_auc.meta_selected_n} of them)`}
-                  {' '}— 50% is a coin toss.
+                    ` High-confidence calls right ${pct(s.live_auc.meta_selected_hit)} (${s.live_auc.meta_selected_n} of them).`}
+                  {' '}50% is a coin toss.
+                  {s.live_auc.direction_auc != null
+                    ? ` AUC ${f2(s.live_auc.direction_auc, 2)}.`
+                    : s.live_auc.direction_auc_note ? ` (${s.live_auc.direction_auc_note})` : ''}
+                  {' '}{s.live_auc.note}
                 </p>
               ) : (
                 <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                   {s?.live_auc?.detail || 'builds up as the monitor runs'} · each call is graded ~1h later against
-                  what price actually did. Give it a few hours of market time.
+                  what price actually did.
                 </p>
               )}
             </div>
@@ -308,6 +328,30 @@ export default function MonitorPanel() {
               <div className="muted" style={{ fontSize: 11, marginLeft: 16 }}>{p.note}</div>
             </div>
           ))}
+        </div>
+
+        <div style={{ borderTop: '1px solid var(--border,#eee)', marginTop: 10, paddingTop: 8 }}>
+          <strong style={{ fontSize: 13 }}>Candlestick patterns on the current bar</strong>
+          <p className="muted" style={{ fontSize: 12, margin: '2px 0 6px' }}>
+            The full set of named candlestick figures (engulfing, hammer, stars, harami…). Detected
+            for completeness — none is separately proven on gold; the project's indicator, S/R and
+            SMC tests all came back flat. Context only.
+          </p>
+          {(s?.candles || []).length === 0 ? (
+            <p className="muted" style={{ fontSize: 12 }}>none on the latest completed bar</p>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {(s?.candles || []).map((cd) => (
+                <span key={cd.name} title={cd.detail} style={{
+                  fontSize: 12, padding: '2px 8px', borderRadius: 6, fontWeight: 600,
+                  background: cd.direction > 0 ? '#ecfdf3' : cd.direction < 0 ? '#fef3f2' : '#f2f4f7',
+                  color: cd.direction > 0 ? '#027a48' : cd.direction < 0 ? '#b42318' : '#475467',
+                }}>
+                  {cd.name.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

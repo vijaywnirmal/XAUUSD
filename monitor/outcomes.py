@@ -91,35 +91,64 @@ def resolve(now: datetime, price: float) -> int:
     return n
 
 
-def live_auc() -> dict:
+MIN_FOR_ANY = 30            # below this: don't report anything, still noise
+MIN_FOR_HIT = 50           # hit-rate is "preliminary" until here
+MIN_FOR_AUC = 80           # AUC needs a real sample...
+MIN_CLASS_FOR_AUC = 20     # ...with enough of BOTH up and down outcomes
+RECENT_WINDOW = 150        # also report the last N, for regime drift
+
+
+def _hit_rate(rows, mask=None):
+    v = [int(r["dir_hit"]) for r in rows
+         if r["dir_hit"] not in ("", None) and (mask is None or mask(r))]
+    return (round(sum(v) / len(v), 3), len(v)) if v else (None, 0)
+
+
+def _auc(rows, pcol, ycol, mask=None):
     from sklearn.metrics import roc_auc_score
+    p, y = [], []
+    for r in rows:
+        if mask and not mask(r):
+            continue
+        if r.get(pcol) in ("", None) or r.get(ycol) in ("", None):
+            continue
+        p.append(float(r[pcol])); y.append(int(float(r[ycol])))
+    n = len(y)
+    n_pos, n_neg = sum(y), n - sum(y)
+    if n < MIN_FOR_AUC or n_pos < MIN_CLASS_FOR_AUC or n_neg < MIN_CLASS_FOR_AUC:
+        return None, n, f"AUC hidden - need {MIN_FOR_AUC}+ with {MIN_CLASS_FOR_AUC}+ of each outcome (have {n}: {n_pos} up / {n_neg} down)"
+    return round(float(roc_auc_score(y, p)), 4), n, None
+
+
+def live_auc() -> dict:
     rows = _read(_OUT, _OF)
-    if len(rows) < 20:
-        return {"available": False, "n": len(rows),
-                "detail": f"{len(rows)} resolved predictions - need ~20+ for a first read"}
+    n = len(rows)
+    if n < MIN_FOR_ANY:
+        return {"available": False, "n": n,
+                "detail": f"{n} calls graded - too few to read anything (need {MIN_FOR_ANY}+, "
+                          f"and {MIN_FOR_HIT}+ for a hit-rate, {MIN_FOR_AUC}+ for AUC)"}
 
-    def _auc(pcol, ycol, mask=None):
-        p, y = [], []
-        for r in rows:
-            if mask and not mask(r):
-                continue
-            if r.get(pcol) in ("", None) or r.get(ycol) in ("", None):
-                continue
-            p.append(float(r[pcol])); y.append(int(float(r[ycol])))
-        if len(set(y)) < 2 or len(y) < 15:
-            return None, len(y)
-        return round(float(roc_auc_score(y, p)), 4), len(y)
+    recent = rows[-RECENT_WINDOW:]
+    all_hit, all_n = _hit_rate(rows)
+    rec_hit, rec_n = _hit_rate(recent)
+    meta_hit, meta_n = _hit_rate(rows, mask=lambda r: r["meta_act"] == "1")
+    meta_hit_rec, _ = _hit_rate(recent, mask=lambda r: r["meta_act"] == "1")
+    dir_auc, dir_auc_n, dir_auc_msg = _auc(rows, "p_up", "realised_up")
+    lon_auc, lon_auc_n, _ = _auc(rows, "london_p_up", "realised_up",
+                                 mask=lambda r: r["london_decision"] == "1")
 
-    dir_auc, dir_n = _auc("p_up", "realised_up")
-    lon_auc, lon_n = _auc("london_p_up", "realised_up", mask=lambda r: r["london_decision"] == "1")
-    sel = [r for r in rows if r["meta_act"] == "1" and r["dir_hit"] not in ("", None)]
-    meta_hit = round(sum(int(r["dir_hit"]) for r in sel) / len(sel), 3) if sel else None
-    all_hit = [int(r["dir_hit"]) for r in rows if r["dir_hit"] not in ("", None)]
+    preliminary = all_n < MIN_FOR_HIT
     return {
-        "available": True, "n_resolved": len(rows),
-        "direction_live_auc": dir_auc, "direction_n": dir_n,
-        "direction_live_hit": round(sum(all_hit) / len(all_hit), 3) if all_hit else None,
-        "meta_selected_hit": meta_hit, "meta_selected_n": len(sel),
-        "london_live_auc": lon_auc, "london_n": lon_n,
-        "note": "true out-of-sample - accumulates while the monitor runs",
+        "available": True,
+        "n_resolved": n,
+        "preliminary": preliminary,
+        "direction_hit": all_hit, "direction_hit_n": all_n,
+        "direction_hit_recent": rec_hit, "recent_n": rec_n,
+        "meta_selected_hit": meta_hit, "meta_selected_n": meta_n,
+        "meta_selected_hit_recent": meta_hit_rec,
+        "direction_auc": dir_auc, "direction_auc_note": dir_auc_msg,
+        "london_auc": lon_auc, "london_auc_n": lon_auc_n,
+        "note": ("PRELIMINARY - too few calls to trust; treat as a sanity check only"
+                 if preliminary else
+                 "cumulative + last %d; still needs weeks across sessions/regimes to be conclusive" % RECENT_WINDOW),
     }

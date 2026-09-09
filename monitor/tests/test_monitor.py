@@ -13,6 +13,7 @@ from monitor import calendar_history as CH
 from monitor import meta as MET
 from monitor import london as LON
 from monitor import outcomes as OUT
+from monitor import candles as CND
 
 
 def _synth_bars(n=400, start="2025-06-10 08:00", drift=0.0, seed=1):
@@ -83,6 +84,33 @@ def test_net_lean_sign():
             {"name": "rsi_extreme", "firing": True, "direction": 1},
             {"name": "ny_orb", "firing": False, "direction": 0}]
     assert P.net_lean(pats) == 3
+
+
+# --- candlestick patterns -------------------------------------------------
+def test_candles_bullish_engulfing():
+    import pandas as pd
+    ts = pd.date_range("2025-06-10 08:00", periods=6, freq="5min", tz="UTC")
+    #                             prior=down bar        current: opens <= prior close, closes >= prior open
+    o = [100, 100, 100, 101, 102.0, 101.3]
+    c = [100, 100, 100, 100.5, 101.4, 102.2]
+    h = [100.1, 100.1, 100.1, 101.1, 102.1, 102.3]
+    l = [99.9, 99.9, 99.9, 100.4, 101.3, 101.2]
+    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": c})
+    names = {d["name"]: d for d in CND.evaluate(df)}
+    assert "bullish_engulfing" in names and names["bullish_engulfing"]["direction"] == 1
+
+
+def test_candles_doji_and_inside_bar():
+    import pandas as pd, numpy as np
+    ts = pd.date_range("2025-06-10 08:00", periods=6, freq="5min", tz="UTC")
+    # wide prior bar, then a tiny doji fully inside it
+    o = [100, 100, 100, 100, 99.0, 100.0]
+    c = [100, 100, 100, 100, 101.0, 100.02]
+    h = [100.1, 100.1, 100.1, 100.1, 101.2, 100.3]
+    l = [99.9, 99.9, 99.9, 99.9, 98.8, 99.7]
+    df = pd.DataFrame({"ts": ts, "open": o, "high": h, "low": l, "close": c})
+    names = {d["name"] for d in CND.evaluate(df)}
+    assert "doji" in names and "inside_bar" in names
 
 
 # --- direction (uses whatever model.json exists; tolerate absence) ----------
@@ -166,3 +194,28 @@ def test_outcomes_record_resolve(tmp_path, monkeypatch):
     assert OUT.resolve(t0 + timedelta(minutes=61), 2005.0) == 1        # matured, price up
     rows = OUT._read(OUT._OUT, OUT._OF)
     assert rows[0]["realised_up"] == "1" and rows[0]["dir_hit"] == "1"
+
+
+def test_live_auc_thresholds(tmp_path, monkeypatch):
+    import csv
+    monkeypatch.setattr(OUT, "_OUT", str(tmp_path / "out.csv"))
+    # 25 rows -> below MIN_FOR_ANY (30): nothing reported
+    def _mkrows(n, up_frac=0.5):
+        rows = []
+        for i in range(n):
+            up = 1 if i < n * up_frac else 0
+            rows.append({**{k: "" for k in OUT._OF}, "p_up": 0.55, "realised_up": up,
+                         "dir_hit": int((0.55 >= 0.5) == bool(up)), "meta_act": "1",
+                         "london_p_up": "", "london_decision": "0"})
+        with open(OUT._OUT, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=OUT._OF); w.writeheader(); w.writerows(rows)
+    _mkrows(25)
+    assert OUT.live_auc()["available"] is False
+    # 60 rows -> hit-rate shows, but preliminary flag off (>=50) and AUC still hidden (<80)
+    _mkrows(60, up_frac=0.5)
+    la = OUT.live_auc()
+    assert la["available"] and la["direction_hit"] is not None
+    assert la["direction_auc"] is None and la["direction_auc_note"]
+    # 120 rows, balanced -> AUC now reported
+    _mkrows(120, up_frac=0.5)
+    assert OUT.live_auc()["direction_auc"] is not None
