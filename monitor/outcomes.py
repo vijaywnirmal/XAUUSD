@@ -138,17 +138,27 @@ def live_auc() -> dict:
                                  mask=lambda r: r["london_decision"] == "1")
 
     preliminary = all_n < MIN_FOR_HIT
+    # trend-bias baseline: what "always guess up" would have scored on the same
+    # calls. If direction_hit isn't clearly above this, the hit-rate is just the
+    # market trending, not model skill - the AUC (which ignores the base rate)
+    # is the honest number then.
+    ups = [int(r["realised_up"]) for r in rows if r["realised_up"] not in ("", None)]
+    base = round(max(sum(ups), len(ups) - sum(ups)) / len(ups), 3) if ups else None
+    beats_baseline = all_hit is not None and base is not None and all_hit > base + 0.02
     return {
         "available": True,
         "n_resolved": n,
         "preliminary": preliminary,
         "direction_hit": all_hit, "direction_hit_n": all_n,
         "direction_hit_recent": rec_hit, "recent_n": rec_n,
+        "always_one_way_baseline": base,
+        "beats_trend_baseline": bool(beats_baseline),
         "meta_selected_hit": meta_hit, "meta_selected_n": meta_n,
         "meta_selected_hit_recent": meta_hit_rec,
         "direction_auc": dir_auc, "direction_auc_note": dir_auc_msg,
         "london_auc": lon_auc, "london_auc_n": lon_auc_n,
         "note": ("PRELIMINARY - too few calls to trust; treat as a sanity check only"
                  if preliminary else
-                 "cumulative + last %d; still needs weeks across sessions/regimes to be conclusive" % RECENT_WINDOW),
+                 "cumulative + last %d. AUC ~0.50 or hit-rate not above the baseline "
+                 "= no skill yet, just market drift. Needs weeks across regimes." % RECENT_WINDOW),
     }

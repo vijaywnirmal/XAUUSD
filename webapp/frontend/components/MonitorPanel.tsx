@@ -43,6 +43,7 @@ interface Snapshot {
     available: boolean; n?: number; n_resolved?: number; preliminary?: boolean
     direction_hit?: number | null; direction_hit_n?: number
     direction_hit_recent?: number | null; recent_n?: number
+    always_one_way_baseline?: number | null; beats_trend_baseline?: boolean
     meta_selected_hit?: number | null; meta_selected_n?: number; meta_selected_hit_recent?: number | null
     direction_auc?: number | null; direction_auc_note?: string | null
     london_auc?: number | null; london_auc_n?: number
@@ -182,9 +183,14 @@ export default function MonitorPanel() {
                   .
                   {s.live_auc.meta_selected_hit != null &&
                     ` High-confidence calls right ${pct(s.live_auc.meta_selected_hit)} (${s.live_auc.meta_selected_n} of them).`}
-                  {' '}50% is a coin toss.
+                  {s.live_auc.always_one_way_baseline != null && (
+                    <> {' '}<span style={{ color: s.live_auc.beats_trend_baseline ? '#027a48' : '#b42318', fontWeight: 600 }}>
+                      Blindly guessing the trend would have scored {pct(s.live_auc.always_one_way_baseline)} —
+                      {s.live_auc.beats_trend_baseline ? ' the model is above that.' : ' the model is NOT clearly above that, so this is drift, not skill.'}
+                    </span></>
+                  )}
                   {s.live_auc.direction_auc != null
-                    ? ` AUC ${f2(s.live_auc.direction_auc, 2)}.`
+                    ? ` Ranking accuracy (AUC) ${f2(s.live_auc.direction_auc, 2)} — 0.50 is random.`
                     : s.live_auc.direction_auc_note ? ` (${s.live_auc.direction_auc_note})` : ''}
                   {' '}{s.live_auc.note}
                 </p>
