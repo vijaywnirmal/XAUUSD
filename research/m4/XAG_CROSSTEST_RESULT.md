@@ -1,57 +1,64 @@
-# Cross-instrument test — primary lead on XAG/USD  (2026-09-10)
+# Cross-instrument prior check — primary lead on silver + 6 FX majors  (2026-09-10)
 
-Silver was never used in this project, so its full Dukascopy history is a clean,
-independent read.  This ran the **frozen** primary-lead rule
-(`research/m4/LAYER_C_ADDENDUM_primary_lead.md`) on silver with **no re-tuning**.
+Pre-registered batch (set before seeing results): **XAG/USD + EURUSD, GBPUSD,
+USDJPY, AUDUSD, USDCAD, USDCHF**.  None was ever used in this project.
 
-- Data: `data_pipeline/fetch_xag_dukascopy.py` → PG table `bars_15min_xag`,
-  **284,129** 15-min bars, **2014-09 → 2026-09** (~12 years; Dukascopy XAG/USD
-  M15 starts Oct 2014).
-- One necessary adaptation (not a signal change): the frozen `SIGMA_FLOOR`
-  (0.4199) is an absolute *gold* price and would drop 98 % of silver bars.  The
-  instrument-agnostic form of that data-hygiene rule — "this instrument's own
-  ATR14 1st percentile" — is **0.0149** for silver.  Every signal parameter
-  (RV20=20, tercile=1/3, A3 lookback=96, cooldown=16, horizons {32,96},
-  friction 0.30σ) is unchanged.
-- Code: `research/m4/xtest_primary_lead.py`.
+- Data: `data_pipeline/fetch_xag_dukascopy.py` + `fetch_fx_dukascopy.py` → PG
+  tables `bars_15min_xag`, `bars_15min_{eurusd,gbpusd,usdjpy,audusd,usdcad,usdchf}`.
+  Silver 2014-09→2026-09; FX 2007/2012→2026-09 (Dukascopy start dates vary).
+  Standalone tables — no XAUUSD table or frozen split touched.
+- Ran the **frozen** rule (`primary_lead_signal.py`, every constant unchanged),
+  `research/m4/xtest_primary_lead.py`.  Two data-hygiene adaptations, not signal
+  changes: (a) per-instrument σ-floor = ATR14 1st percentile over non-flat bars
+  (the frozen 0.4199 is an absolute *gold* price); (b) per-event σ returns
+  winsorised at ±20 — Dukascopy pads illiquid FX periods with ~6 % flat
+  (high==low) bars, which `run1.py` also winsorised for.  M1's daily boundary
+  stays 00:00 UTC (FX has no true daily close — a caveat, not a change).
 
-## Result — the pattern reproduces, weaker
+## Result — the LOW-vol / breakout-continuation effect is NOT general
 
-**Frozen rule (LOW-vol regime only, as the collector would trade), 12 y, ~118 signals/yr:**
+**24-hour book, LOW-vol regime, net σ after 0.30σ friction:**
 
-| book | n | gross | **net** | boot CI (net) | win % (net) |
-|---|---|---|---|---|---|
-| 8h  | 1,416 | +0.298σ | **−0.002σ** | [−0.253, +0.244] | 45.4 % |
-| 24h | 1,416 | +0.499σ | **+0.199σ** | [−0.189, +0.583] | 50.6 % |
-
-**Regime contrast on ALL new-96-bar extremes (24h hold):**
-
-| regime | n | net | | (XAU, for comparison) |
+| instrument | 24h LOW net | 95 % CI | signals/yr | LOW>MID>HIGH monotone |
 |---|---|---|---|---|
-| LOW (gate open) | 1,429 | **+0.17σ** | | +0.45σ |
-| MID | 1,652 | −0.11σ | | −0.33σ |
-| HIGH | 2,183 | −0.24σ | | −0.22σ |
+| **XAUUSD (reference, already-touched)** | **+0.448σ** | — | 190 | yes |
+| XAG/USD (silver) | **+0.205σ** | [−0.16, +0.57] | 118 | yes |
+| USD/JPY | **+0.173σ** | [−0.11, +0.44] | 147 | yes |
+| USD/CHF | −0.201σ | [−0.46, +0.06] | 203 | yes |
+| EUR/USD | −0.293σ | [−0.55, −0.04] | 149 | yes |
+| AUD/USD | −0.337σ | [−0.56, −0.13] | 219 | yes |
+| USD/CAD | −0.380σ | [−0.66, −0.10] | 189 | no |
+| GBP/USD | −0.382σ | [−0.70, −0.06] | 148 | no |
+
+**0 of 7** have a LOW-regime 24h net CI that excludes zero on the positive side.
 
 ## Read
 
-**Supporting, not confirming.**
+- **Positive only in trending assets.**  Gold clearly (+0.45σ), silver weakly
+  (+0.20σ, CI still spans 0), and **USD/JPY** leans positive (+0.17σ) — JPY being
+  the most trend-/carry-driven major.  That is a coherent pattern: a genuine
+  breakout out of a calm range *extends* in assets that trend.
+- **Negative — a FADE — in EUR, GBP, AUD, CAD** (−0.29 to −0.38σ, three of four
+  with CI excluding zero on the *negative* side), borderline-negative in CHF.
+  In those pairs a calm-regime new-extreme breakout mean-reverts, exactly as
+  expected for range-bound FX.
+- The "monotone LOW>MID>HIGH" count (5/7) is a weak indicator here — for the
+  negative pairs it just means LOW is the *least bad*, not good.
 
-- The **qualitative structure holds on a fully independent instrument**: win rate
-  is ~flat across regimes (43–51 %), the edge is in payoff not hit rate, and the
-  continuation is **monotone in the vol regime** — positive only when the market
-  has been quiet, negative in normal/chaotic regimes.  This is the same shape as
-  XAUUSD and makes a gold-only-artifact explanation less likely — there is
-  probably a real mechanism (calm market → a genuine breakout carries).
-- **But the magnitude is ~half** (24h net +0.20σ vs gold's +0.45σ), and silver's
-  24h net **confidence interval includes zero** — silver on its own would not
-  clear the addendum's PASS bar.  8h is breakeven, as on gold.
+## Effect on the prior — mildly cautionary, not supportive
 
-## Status
+- This is **not** "the mechanism generalises," which would have been strong
+  support.  It is "the effect is specific to trending assets (metals + JPY)."
+- That is consistent with two explanations: (i) a real but narrow behavioural
+  regularity, or (ii) a **trend-era artifact** — gold trended hard 2009–2026 and
+  breakouts-from-quiet happened to extend.  The FX batch cannot separate these
+  and slightly favours caution.
+- Silver + JPY leaning positive is a thin thread of independent support; 4/7
+  clearly negative is the dominant signal.
 
-- This does **not** change the XAUUSD forward-paper test or its frozen verdicts.
-  It is historical cross-sectional evidence, not an out-of-sample PASS.
-- It raises prior confidence that the primitive is real, while flagging that its
-  size is instrument-dependent and modest.
-- `bars_15min_xag` is a standalone PG table; it does not touch any XAUUSD table
-  or the frozen research splits.  No new tuning was done and none is licensed by
-  this result.
+## Status — unchanged
+
+The XAUUSD forward-paper test and its pre-registered verdicts are **not affected**.
+This batch does not license any tuning.  It lowers rather than raises confidence
+that the primary lead is a robust cross-asset phenomenon; the XAUUSD forward
+paper remains the only thing that can settle whether it is real for gold.

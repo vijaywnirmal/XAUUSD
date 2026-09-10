@@ -1,15 +1,19 @@
 """
-Cross-instrument test of the FROZEN M4 primary lead on XAG/USD (silver).
+Cross-instrument PRIOR CHECK for the frozen M4 primary lead.
 
-Silver was never used in this project — its full Dukascopy history is a clean,
-independent read.  This runs the *exact* frozen rule
-(research/m4/LAYER_C_ADDENDUM_primary_lead.md, imported from primary_lead_signal.py
-with every constant unchanged): M1 20-day-RV bottom-tercile regime + new 96-bar
-extreme -> continuation, 8h / 24h holds, 0.30 sigma friction.  NO re-tuning.
+Pre-registered batch (decided before seeing results):
+  silver  + 6 FX majors: EURUSD GBPUSD USDJPY AUDUSD USDCAD USDCHF
 
-Reports, and puts side-by-side with XAUUSD:
-  * the frozen-rule numbers (LOW regime only, as the collector would trade)
-  * the LOW / MID / HIGH regime contrast on ALL new-96-bar extremes
+Runs the *exact* frozen rule (research/m4/LAYER_C_ADDENDUM_primary_lead.md,
+imported from primary_lead_signal.py) on each — M1 20-day-RV bottom-tercile
+regime + new 96-bar extreme -> continuation, 8h/24h holds, 0.30 sigma friction.
+NO re-tuning.  The ONLY per-instrument change is the data-hygiene sigma-floor,
+recomputed as that instrument's own ATR14 1st percentile (the frozen 0.4199 is
+an absolute *gold* price).  M1's daily boundary stays 00:00 UTC, identical to
+the frozen rule (FX has no true daily close; noted as a caveat).
+
+This does NOT change the XAUUSD forward-paper test or its verdicts.  It is a
+prior-strengthening cross-section, reported in full with no cherry-picking.
 
 Run:  python -m research.m4.xtest_primary_lead
 """
@@ -33,111 +37,146 @@ from research.m4.primary_lead_signal import (
     signals, _m1_low_by_day, _atr14, _boot_ci,
     A3_LB, A3_COOLDOWN, HORIZONS, FRICTION_SIGMA, TERCILE,
 )
-from data_pipeline.dataset import _pg_dsn, load_bars
+from data_pipeline.dataset import _pg_dsn
 
-# The frozen SIGMA_FLOOR (0.4199) is an absolute PRICE value calibrated to gold's
-# ATR14 bottom-1% — meaningless on silver ($30 vs $4400).  The instrument-agnostic
-# form of that data-hygiene rule is "this instrument's own ATR14 1st percentile".
-# We recompute it per instrument below; the SIGNAL logic and every other constant
-# are unchanged (same reasoning as the addendum's loader-change note).
-SIGMA_FLOOR = None  # set in main()
+WINS = 20.0   # winsorise per-event sigma returns (run1 did the same for near-zero-ATR degeneracy)
 
-# XAUUSD frozen-generator reference (from primary_lead_signal.py --reference)
-XAU_REF = {"8h": {"n": 3372, "gross": 0.374, "net": 0.074, "win": 45.6},
-           "24h": {"n": 3372, "gross": 0.748, "net": 0.448, "win": 50.2}}
+BATCH = [
+    ("bars_15min_xag", "XAG/USD"),
+    ("bars_15min_eurusd", "EUR/USD"),
+    ("bars_15min_gbpusd", "GBP/USD"),
+    ("bars_15min_usdjpy", "USD/JPY"),
+    ("bars_15min_audusd", "AUD/USD"),
+    ("bars_15min_usdcad", "USD/CAD"),
+    ("bars_15min_usdchf", "USD/CHF"),
+]
+XAU_REF = {"8h": (0.374, 0.074, 45.6), "24h": (0.748, 0.448, 50.2)}   # gross, net, win%
 
 
-def load_xag() -> pd.DataFrame:
+def load_table(table: str) -> pd.DataFrame:
     with psycopg2.connect(**_pg_dsn()) as c:
-        df = pd.read_sql("SELECT ts,open,high,low,close FROM bars_15min_xag ORDER BY ts", c)
+        df = pd.read_sql(f"SELECT ts,open,high,low,close FROM {table} ORDER BY ts", c)
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     return df.dropna().reset_index(drop=True)
 
 
-def frozen_rule(df: pd.DataFrame, tag: str):
+def frozen_rule(df, tag):
     s = signals(df)
-    r = s[s.status == "resolved"]
-    print(f"\n=== {tag}: FROZEN RULE (LOW-vol regime only, as traded) ===")
-    print(f"{'book':5s} {'n':>6} {'gross sd':>10} {'NET sd':>9} {'win% net':>9} {'boot CI (net)':>22}")
+    out = {}
+    if "status" not in s.columns:
+        print(f"  {tag}: 0 signals"); return {b: None for b in HORIZONS}
+    r = s[s.status == "resolved"].copy()
+    r["gross_sigma"] = r["gross_sigma"].clip(-WINS, WINS)
+    r["net_sigma"] = r["gross_sigma"] - FRICTION_SIGMA
     for b in HORIZONS:
         g = r[r.book == b]
-        if len(g) == 0:
-            print(f"{b:5s}      0   (no signals)"); continue
-        ci = _boot_ci(g.net_sigma.to_numpy())
-        print(f"{b:5s} {len(g):>6} {g.gross_sigma.mean():>+9.3f} {g.net_sigma.mean():>+8.3f} "
-              f"{100*(g.net_sigma>0).mean():>8.1f} {f'[{ci[0]}, {ci[1]}]':>22}")
+        if len(g) < 20:
+            out[b] = None; continue
+        ci = tuple(round(float(x), 3) if x is not None else None
+                   for x in _boot_ci(g.net_sigma.to_numpy()))
+        out[b] = dict(n=len(g), gross=g.gross_sigma.mean(), net=g.net_sigma.mean(),
+                      win=100 * (g.net_sigma > 0).mean(), ci=ci)
     yrs = (df.ts.max() - df.ts.min()).days / 365.25
-    print(f"signal rate ~ {s.anchor_ts.nunique()/yrs:.0f}/yr   ({df.ts.min().date()} .. {df.ts.max().date()}, {yrs:.1f}y)")
-    return s
+    out["rate"] = s.anchor_ts.nunique() / yrs
+    out["span"] = (df.ts.min().date(), df.ts.max().date(), round(yrs, 1))
+    return out
 
 
-def regime_contrast(df: pd.DataFrame, tag: str):
+def regime_contrast(df):
     o = df["open"].to_numpy(float); hi = df["high"].to_numpy(float)
     lo = df["low"].to_numpy(float); cl = df["close"].to_numpy(float)
     ts = pd.DatetimeIndex(df["ts"]); n = len(df)
     atr = _atr14(hi, lo, cl)
     _, _, pct = _m1_low_by_day(df)
-    day = ts.floor("D")
-    pcm = pct.reindex(day).to_numpy()
+    pcm = pct.reindex(ts.floor("D")).to_numpy()
     bucket = np.where(np.isnan(pcm), np.nan,
                       np.where(pcm < TERCILE, 0, np.where(pcm < 0.667, 1, 2)))
-
-    roll_hi = pd.Series(hi).rolling(A3_LB).max().to_numpy()
-    roll_lo = pd.Series(lo).rolling(A3_LB).min().to_numpy()
-    rows = []
-    lu = ld = -10 ** 9
+    rh = pd.Series(hi).rolling(A3_LB).max().to_numpy()
+    rl = pd.Series(lo).rolling(A3_LB).min().to_numpy()
+    rows = []; lu = ld = -10 ** 9
     for i in range(A3_LB, n - max(HORIZONS.values()) - 1):
-        if not np.isfinite(atr[i]) or atr[i] < SIGMA_FLOOR or np.isnan(bucket[i]):
+        if not np.isfinite(atr[i]) or atr[i] < PLS.SIGMA_FLOOR or np.isnan(bucket[i]):
             continue
         side = 0
-        if hi[i] >= roll_hi[i] and i - lu >= A3_COOLDOWN:
+        if hi[i] >= rh[i] and i - lu >= A3_COOLDOWN:
             side, lu = 1, i
-        elif lo[i] <= roll_lo[i] and i - ld >= A3_COOLDOWN:
+        elif lo[i] <= rl[i] and i - ld >= A3_COOLDOWN:
             side, ld = -1, i
         if side == 0:
             continue
-        ent = o[i + 1]
-        rec = {"bucket": int(bucket[i])}
+        ent = o[i + 1]; rec = {"b": int(bucket[i])}
         for bk, H in HORIZONS.items():
-            g = side * (cl[i + H] - ent) / atr[i]
-            rec[bk] = g
-            rec[bk + "_net"] = g - FRICTION_SIGMA
+            g = float(np.clip(side * (cl[i + H] - ent) / atr[i], -WINS, WINS))
+            rec[bk] = g - FRICTION_SIGMA
         rows.append(rec)
     a = pd.DataFrame(rows)
-    lab = {0: "LOW (gate open)", 1: "MID", 2: "HIGH"}
-    print(f"\n=== {tag}: LOW / MID / HIGH contrast on ALL new-96-bar extremes ===")
+    res = {}
     for bk in HORIZONS:
-        print(f"  -- {bk} hold --")
-        print(f"  {'regime':16s} {'n':>6} {'win% net':>9} {'mean gross':>11} {'mean NET':>9}")
-        for b in (0, 1, 2):
-            s = a[a.bucket == b]
-            if len(s) < 20:
-                print(f"  {lab[b]:16s} {len(s):>6}  (thin)"); continue
-            print(f"  {lab[b]:16s} {len(s):>6} {100*(s[bk+'_net']>0).mean():>8.1f} "
-                  f"{s[bk].mean():>+10.3f} {s[bk+'_net'].mean():>+8.3f}")
-    return a
+        res[bk] = {b: (a[a.b == b][bk].mean() if (a.b == b).sum() >= 20 else np.nan)
+                   for b in (0, 1, 2)}
+    return res
 
 
 def main():
-    global SIGMA_FLOOR
-    xag = load_xag()
-    o = xag["open"].to_numpy(float); h = xag["high"].to_numpy(float)
-    l = xag["low"].to_numpy(float); c = xag["close"].to_numpy(float)
-    SIGMA_FLOOR = float(np.nanpercentile(_atr14(h, l, c), 1))
-    PLS.SIGMA_FLOOR = SIGMA_FLOOR          # signals() reads this module global
-    print(f"XAG/USD bars_15min_xag: {len(xag):,} bars  {xag.ts.min()} .. {xag.ts.max()}")
-    print(f"per-instrument sigma-floor (ATR14 p1): {SIGMA_FLOOR:.4f}  "
-          f"(XAU frozen value 0.4199 would drop 98% of silver bars)")
-    frozen_rule(xag, "XAG/USD")
-    regime_contrast(xag, "XAG/USD")
+    summ = []
+    for table, tag in BATCH:
+        try:
+            df = load_table(table)
+        except Exception as e:
+            print(f"\n{tag}: table missing ({e})"); continue
+        h = df["high"].to_numpy(float); l = df["low"].to_numpy(float); c = df["close"].to_numpy(float)
+        atr = _atr14(h, l, c)
+        # Dukascopy pads illiquid FX periods with flat (high==low) bars (~6%);
+        # those drag ATR14 -> ~0. Equivalent hygiene to gold's p1 floor: p1 of
+        # ATR14 over NON-FLAT bars, and never below 10% of the median.
+        nonflat = atr[np.isfinite(atr) & (h != l)]
+        PLS.SIGMA_FLOOR = float(max(np.nanpercentile(nonflat, 1),
+                                    0.10 * np.nanmedian(atr[np.isfinite(atr)])))
+        fr = frozen_rule(df, tag)
+        rc = regime_contrast(df)
+        print(f"\n### {tag}  ({len(df):,} bars, {fr.get('span')}, sigma-floor {PLS.SIGMA_FLOOR:.5f}) ###")
+        for b in HORIZONS:
+            v = fr.get(b)
+            if v:
+                print(f"  {b:4s} frozen rule: n={v['n']:5d}  gross {v['gross']:+.3f}sd  "
+                      f"NET {v['net']:+.3f}sd  CI[{v['ci'][0]}, {v['ci'][1]}]  win {v['win']:.1f}%")
+        for b in HORIZONS:
+            r = rc[b]
+            mono = (r[0] > r[1] > r[2]) if not any(np.isnan(list(r.values()))) else None
+            print(f"  {b:4s} regime net: LOW {r[0]:+.3f}  MID {r[1]:+.3f}  HIGH {r[2]:+.3f}"
+                  f"   monotone(LOW>MID>HIGH): {mono}")
+        v24 = fr.get("24h")
+        r24 = rc["24h"]
+        summ.append(dict(
+            pair=tag,
+            low24_net=None if not v24 else round(v24["net"], 3),
+            low24_ci=None if not v24 else v24["ci"],
+            n24=None if not v24 else v24["n"],
+            rate=round(fr.get("rate", 0), 0),
+            monotone_24h=(r24[0] > r24[1] > r24[2]) if not any(np.isnan(list(r24.values()))) else None,
+            ci_excl_0=None if not v24 else (v24["ci"][0] is not None and v24["ci"][0] > 0),
+        ))
 
-    print("\n" + "=" * 66)
-    print("XAUUSD frozen-generator reference (already-touched, for comparison):")
-    for b, v in XAU_REF.items():
-        print(f"  {b:4s}  n={v['n']}  gross {v['gross']:+.3f}sd  NET {v['net']:+.3f}sd  win {v['win']}%")
-    print("=" * 66)
-    print("Cross-instrument agreement would be supporting evidence; disagreement "
-          "would weaken the primitive. Neither is a forward-paper PASS/FAIL for XAUUSD.")
+    print("\n" + "=" * 78)
+    print("PRE-REGISTERED BATCH SUMMARY  (frozen rule; nothing selected post-hoc)")
+    print("=" * 78)
+    print(f"{'pair':9s} {'24h LOW net':>12} {'CI (net)':>22} {'n':>6} {'sig/yr':>7} "
+          f"{'monotone':>9} {'CI>0':>6}")
+    for r in summ:
+        ci = r["low24_ci"]
+        cis = "n/a" if ci is None else f"[{ci[0]:+.3f}, {ci[1]:+.3f}]"
+        net = "n/a" if r["low24_net"] is None else f"{r['low24_net']:+.3f}"
+        print(f"{r['pair']:9s} {net:>12} {cis:>22} {str(r['n24']):>6} "
+              f"{str(int(r['rate'])):>7} {str(r['monotone_24h']):>9} {str(r['ci_excl_0']):>6}")
+    mono = sum(1 for r in summ if r["monotone_24h"])
+    sig = sum(1 for r in summ if r["ci_excl_0"])
+    print(f"\nXAUUSD reference: 24h gross +0.748 / NET +0.448sd / win 50.2% "
+          f"(already-touched, not part of this batch)")
+    print(f"of {len(summ)} instruments: {mono} show the LOW>MID>HIGH monotone at 24h; "
+          f"{sig} have a LOW-regime 24h net CI excluding zero.")
+    print("Reading: FX intraday is more mean-reverting than metals, so a null on FX "
+          "is weak evidence; a positive on FX is strong. This does NOT feed the "
+          "frozen XAUUSD rule or its forward-paper verdict.")
 
 
 if __name__ == "__main__":

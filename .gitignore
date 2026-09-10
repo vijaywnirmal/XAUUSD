@@ -70,3 +70,4 @@ run_logs/
 research/*_train.csv
 research/*_test.csv
 research/m4/_xag_fetch.log
+research/m4/_fx_fetch.log
