@@ -69,3 +69,4 @@ research/m4/paper_primary_lead.csv
 run_logs/
 research/*_train.csv
 research/*_test.csv
+research/m4/_xag_fetch.log
