@@ -53,3 +53,19 @@ tool-results/
 .DS_Store
 Thumbs.db
 *.tmp
+
+# research: regenerable data dumps + scratch run logs (the .py scripts and *.md/ledger results ARE committed)
+research/_*.txt
+research/*_train_*.csv
+research/*_test_*.csv
+research/*_signals.csv
+research/*_trades.csv
+research/ema5_daily_trail.csv
+research/mr_stage_a_k4.csv
+research/m4/_*.log
+research/m4/events.parquet
+research/m4/paper_run.log
+research/m4/paper_primary_lead.csv
+run_logs/
+research/*_train.csv
+research/*_test.csv
