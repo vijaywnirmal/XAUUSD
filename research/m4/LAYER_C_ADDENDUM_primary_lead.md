@@ -204,3 +204,28 @@ a FAIL for that book even if the point estimate is still > 0.
   rule is regime-gated and will stay idle until RV20 falls back into the bottom
   tercile.  The lumpy event rate is expected — evaluate the §9 rate-drift guard
   with that in mind.
+
+---
+
+## 12. Held-out data is EXHAUSTED — forward paper is the ONLY remaining test
+
+There is **no clean walk-forward or out-of-sample window left** for this
+hypothesis (or any other).  See `research/HELD_OUT_DATA_POLICY.md` for the
+project-wide rule; the specifics for this lead:
+
+- `walk_forward` (2023-01 → 2024-07) and `out_of_sample` (2024-07 → 2026-09) were
+  **both consumed before M4** (H7 carry, H2 continuation — the touch-once guard
+  overridden with `allow_oos=True` each time).
+- **M4 Run 1 + v2 analysed the full 2009–2026 series as one dataset**, with those
+  two windows as descriptive blocks **P3** and **P4**.  Every block — including
+  P4 — was *inspected during discovery*.  The "stable across all four blocks /
+  survives the block bootstrap" claim, and the per-block figures (P3 +1.42σ,
+  P4 +0.72σ at 24h), are therefore **in-sample-flavoured, not independent
+  confirmation**.
+- **Consequence:** the primary lead has passed *in-sample statistical validation
+  only*.  Its per-block persistence into 2023–26 is encouraging but does not
+  count as a held-out test, because P3/P4 were part of the selection.
+- The single genuinely untouched dataset is **forward time from F = 2026-09-11
+  onward** — data whose timestamps post-date the freezing + commit of this
+  addendum.  That is why this is a forward-paper collector, not a backtest.  The
+  §9 verdicts are evaluated on that forward data alone.

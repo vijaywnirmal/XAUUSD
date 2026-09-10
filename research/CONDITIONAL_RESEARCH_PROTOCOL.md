@@ -47,8 +47,12 @@ Three conclusions are kept explicitly separate:
 
 **Time blocks** (fixed, disjoint):
 `P1` 2009-01…2015-12 · `P2` 2016-01…2022-12 · `P3` 2023-01…2024-06 ·
-`P4` 2024-07…2026-08. (P4 = the historical OOS window; already spent for
-strategy validation, usable here for descriptive block estimates only.)
+`P4` 2024-07…2026-08. (P3 = the old `walk_forward`, P4 = the old `out_of_sample` —
+**both are SPENT**, see `research/HELD_OUT_DATA_POLICY.md`. Used here only as
+descriptive per-period blocks; a cell passing "stable across P1–P4" is
+in-sample-flavoured, **not** independently confirmed. No pass/fail may rest on
+P3 or P4. The only remaining out-of-sample test for any hypothesis is
+forward-paper time.)
 
 ---
 

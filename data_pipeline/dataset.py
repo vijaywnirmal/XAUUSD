@@ -84,8 +84,10 @@ def load_bars(tf="1min", split=None, start=None, end=None, allow_oos=False, colu
         raise ValueError(f"tf must be one of {C.BAR_TIMEFRAMES}")
     if split == "out_of_sample" and not allow_oos:
         raise RuntimeError(
-            "out_of_sample is touch-once. Pass allow_oos=True only for the single "
-            "final validation run, and record that you did."
+            "out_of_sample is SPENT (see research/HELD_OUT_DATA_POLICY.md). It was "
+            "used on H7, H2, and inspected as block P4 in M4 Run 1. Do NOT pass "
+            "allow_oos=True — it can no longer serve as an independent held-out "
+            "test. Validate new strategies on forward-paper time instead."
         )
     return _load_bars_postgres(tf, split, start, end, columns)
 
