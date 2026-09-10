@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from webapp.backend import runner, export, builder, nl_parser, saved_strategies, livebot_monitor, monitor_view
+from webapp.backend import runner, export, builder, nl_parser, saved_strategies, livebot_monitor, monitor_view, primary_lead_view
 from webapp.backend.registry import STRATEGY_REGISTRY
 from webapp.backend.indicators import INDICATOR_REGISTRY
 from webapp.backend.jsonsafe import safe
@@ -229,6 +229,13 @@ def monitor_snapshot():
 @app.get("/monitor/history")
 def monitor_history(limit: int = 240):
     return monitor_view.history(limit)
+
+
+@app.get("/primary-lead/status")
+def primary_lead_status():
+    """Read-only state of the M4 primary-lead forward-paper experiment.
+    Not a strategy, not a live-trade feed — see the disclaimer in the payload."""
+    return safe(primary_lead_view.status())
 
 
 @app.get("/run/{run_id}/detail")

@@ -303,3 +303,39 @@ export function fetchLiveBotDecisions(limit = 40) {
 export function fetchLiveBotTrades() {
   return getJson<LiveBotTrades>('/api/livebot/trades')
 }
+
+export interface PrimaryLeadBook {
+  n_resolved: number
+  n_open: number
+  mean_net_sigma: number | null
+  mean_gross_sigma?: number | null
+  ci: [number | null, number | null]
+  verdict: string
+  expect: { gross: number; net: number; ci: [number, number]; win: number }
+}
+export interface PrimaryLeadStatus {
+  error?: string
+  as_of_bar?: string
+  bar_age_min?: number
+  rv20_pctile?: number | null
+  regime?: string
+  gate_open?: boolean
+  atr14?: number | null
+  atr_floor?: number
+  atr_ok?: boolean
+  a3_on_latest_bar?: boolean
+  last_a3_anchor?: { ts: string | null; side: number | null }
+  signal_now?: boolean
+  signal_side?: number | null
+  last_historical_signal?: string | null
+  signals_since_F?: number
+  F_start?: string
+  params?: Record<string, unknown>
+  books?: Record<string, PrimaryLeadBook>
+  disclaimer: string
+  spec?: string
+  computed_at?: string
+}
+export function fetchPrimaryLeadStatus() {
+  return getJson<PrimaryLeadStatus>('/api/primary-lead/status')
+}
