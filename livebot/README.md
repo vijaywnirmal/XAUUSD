@@ -22,6 +22,22 @@ LIVEBOT_MODE=replay python -m livebot                      # offline state-machi
 LIVEBOT_MODE=live LIVEBOT_CONFIRM_LIVE=yes python -m livebot  # real orders (you set both)
 ```
 
+## Several instruments (fleet)
+
+`python -m livebot.fleet` runs one paper bot per instrument in `config.INSTRUMENTS` (XAUUSD, EURUSD,
+GBPUSD, USDJPY, AUDUSD, USDCAD), each its own process with `LIVEBOT_SYMBOL` set, and exits when every bot
+has finished its day. Logs: `logs/` for XAUUSD, `logs/<SYMBOL>/` for the rest. Only XAUUSD's guards come
+from the backtest; the FX box-width / spread caps are sanity limits, not tuned - FX is untested.
+
+Each closed paper trade also writes `logs/[<SYMBOL>/]replays/<date>_<SYMBOL>.json` (the trade plus M1 bars
+from 13:15 UTC to the close and 1-second bars around the fill and the close) and runs
+`LIVEBOT_ON_TRADE_CMD`. The nifty-reels repo schedules the fleet ("21 MT5 Bots") and turns each replay
+file into a Short.
+
+**Server time.** MT5 bar and tick times are the broker's server time (Vantage: UTC+3 while New York is
+on daylight time, UTC+2 otherwise), not UTC. `Mt5Feed` converts them (`brokers.server_offset`, checked
+against a live tick at connect). Before this the box was read three hours early.
+
 ## Strategy (matches the backtest)
 
 1. Box = completed M5 bars with open time in **13:30–14:00 UTC** → `box_high` = max high, `box_low` = min low.
@@ -67,5 +83,6 @@ time). No MT5 connection required.
 | `brokers.py` | `Mt5Feed` / `ReplayFeed` price feeds; `PaperBroker` (sim) / `Mt5Broker` (real, gated) |
 | `runner.py` | the poll loop: build Context → `decide()` → execute Intent |
 | `logbook.py` | JSONL decision stream + trades CSV |
-| `config.py` | all knobs; `MODE` defaults to `paper` |
+| `config.py` | all knobs; `MODE` defaults to `paper`; per-instrument settings |
+| `fleet.py` | one paper bot per instrument, for scheduled runs |
 | `__main__.py` | entry point |

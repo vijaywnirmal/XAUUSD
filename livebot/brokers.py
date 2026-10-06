@@ -13,13 +13,30 @@ All position/order queries are filtered to this bot's MAGIC + SYMBOL.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from livebot import config
 from livebot.h1_strategy import Bar
 
-CONTRACT = 100.0            # oz per 1.0 lot (XAUUSD)
+CONTRACT = config.CONTRACT  # units per 1.0 lot (100 oz gold, 100,000 FX)
+
+
+def _nth_sunday(year: int, month: int, n: int) -> date:
+    d = date(year, month, 1)
+    d += timedelta(days=(6 - d.weekday()) % 7)
+    return d + timedelta(weeks=n - 1)
+
+
+def server_offset(now_utc: datetime) -> timedelta:
+    """MT5 bar/tick times are broker server time, not UTC. Vantage (like most MT5 brokers) runs on the
+    "New York close" clock: UTC+3 while New York is on daylight time, UTC+2 otherwise. US DST runs from
+    the second Sunday of March to the first Sunday of November, switching at 02:00 New York time
+    (07:00 UTC in March, 06:00 UTC in November)."""
+    y = now_utc.year
+    start = datetime.combine(_nth_sunday(y, 3, 2), datetime.min.time(), timezone.utc) + timedelta(hours=7)
+    end = datetime.combine(_nth_sunday(y, 11, 1), datetime.min.time(), timezone.utc) + timedelta(hours=6)
+    return timedelta(hours=3 if start <= now_utc < end else 2)
 
 
 # --------------------------------------------------------------------- types
@@ -67,6 +84,15 @@ class Mt5Feed:
         import MetaTrader5 as mt5
         self.mt5 = mt5
         self._m5 = mt5.TIMEFRAME_M5
+        self.offset = server_offset(datetime.now(timezone.utc))
+
+    def _utc(self, server_ts: float) -> datetime:
+        """A server-time epoch from MT5 -> true UTC."""
+        return datetime.fromtimestamp(server_ts, tz=timezone.utc) - self.offset
+
+    def _server(self, utc: datetime) -> int:
+        """True UTC -> the server-time epoch MT5's range queries expect."""
+        return int((utc + self.offset).timestamp())
 
     def connect(self):
         mt5 = self.mt5
@@ -78,6 +104,18 @@ class Mt5Feed:
             raise RuntimeError("MT5 terminal is not connected to a trade server")
         if not mt5.symbol_select(config.SYMBOL, True):
             raise RuntimeError(f"symbol_select({config.SYMBOL}) failed")
+        # cross-check the server clock against a fresh tick (only meaningful while the market trades)
+        t = mt5.symbol_info_tick(config.SYMBOL)
+        now = datetime.now(timezone.utc)
+        if t is not None and abs(now - self._utc(t.time)) < timedelta(minutes=2):
+            pass  # the expected offset matches a live quote
+        elif t is not None:
+            seen = round((t.time - now.timestamp()) / 1800) * 30  # minutes, to the nearest half hour
+            if seen in (120, 180) and seen != self.offset.total_seconds() // 60:
+                from livebot import logbook
+                logbook.event("WARN", msg=f"server clock looks like UTC{seen / 60:+g}, expected "
+                                          f"UTC+{self.offset.total_seconds() / 3600:g}; using the tick's")
+                self.offset = timedelta(minutes=seen)
         acc = mt5.account_info()
         return acc
 
@@ -93,13 +131,41 @@ class Mt5Feed:
         rates = self.mt5.copy_rates_from_pos(config.SYMBOL, self._m5, 1, n)  # skip forming bar
         if rates is None:
             return []
-        return [Bar(time=datetime.fromtimestamp(r["time"], tz=timezone.utc),
+        return [Bar(time=self._utc(r["time"]),
                     open=float(r["open"]), high=float(r["high"]),
                     low=float(r["low"]), close=float(r["close"])) for r in rates]
 
     def tick(self) -> Tick:
         t = self.mt5.symbol_info_tick(config.SYMBOL)
-        return Tick(time=datetime.fromtimestamp(t.time, tz=timezone.utc), bid=float(t.bid), ask=float(t.ask))
+        if t is None:  # terminal closed or disconnected: try to re-attach before the next poll
+            self.mt5.shutdown()
+            self.mt5.initialize()
+            raise RuntimeError(f"no quote for {config.SYMBOL} - is MT5 open and connected?")
+        return Tick(time=self._utc(t.time), bid=float(t.bid), ask=float(t.ask))
+
+    def replay_data(self, start: datetime, end: datetime, second_windows) -> dict:
+        """Price history for a trade's video: M1 bars over [start, end] and 1-second bars (from ticks)
+        over each (from, to) in second_windows. Bid prices, like MT5's own charts. Times are UTC ISO."""
+        mt5 = self.mt5
+        rates = mt5.copy_rates_range(config.SYMBOL, mt5.TIMEFRAME_M1, self._server(start), self._server(end))
+        minutes = [[self._utc(r["time"]).isoformat(), float(r["open"]), float(r["high"]), float(r["low"]),
+                    float(r["close"])] for r in (rates if rates is not None else [])]
+        seconds = []
+        for a, b in second_windows:
+            ticks = mt5.copy_ticks_range(config.SYMBOL, self._server(a), self._server(b), mt5.COPY_TICKS_ALL)
+            bars: dict[int, list] = {}
+            for t in (ticks if ticks is not None else []):
+                bid = float(t["bid"])
+                if bid <= 0:
+                    continue
+                sec = int(t["time_msc"]) // 1000
+                if sec in bars:
+                    bar = bars[sec]
+                    bar[1], bar[2], bar[3] = max(bar[1], bid), min(bar[2], bid), bid
+                else:
+                    bars[sec] = [bid, bid, bid, bid]
+            seconds += [[self._utc(sec).isoformat(), *bar] for sec, bar in sorted(bars.items())]
+        return {"minutes": minutes, "seconds": seconds}
 
 
 class ReplayFeed:
@@ -254,29 +320,37 @@ class PaperBroker:
                              box_hi=order.box_hi, box_lo=order.box_lo, entry_spread=tk.spread)
         self._orders = []
         from livebot import logbook
-        logbook.event("PAPER_FILL", side="long" if side > 0 else "short", px=round(px, 2),
-                      sl=round(self._pos.sl, 2), spread=round(tk.spread, 3))
+        logbook.event("PAPER_FILL", side="long" if side > 0 else "short", px=round(px, config.DIGITS),
+                      sl=round(self._pos.sl, config.DIGITS), spread=round(tk.spread, config.DIGITS + 1))
 
     def _settle(self, exit_px, reason, exit_spread):
         p = self._pos
-        gross = p.side * (exit_px - p.entry_px) * p.volume * CONTRACT
-        cost = ((p.entry_spread / 2 + exit_spread / 2) + 2 * config.PAPER_SLIPPAGE_USD) * p.volume * CONTRACT \
+        exit_time = self.tick().time
+        # P&L is in the quote currency; USDJPY/USDCAD convert to USD at the exit price
+        to_usd = 1.0 if config.QUOTE_USD else 1.0 / exit_px
+        gross = p.side * (exit_px - p.entry_px) * p.volume * CONTRACT * to_usd
+        cost = ((p.entry_spread / 2 + exit_spread / 2) + 2 * config.PAPER_SLIPPAGE_USD) * p.volume * CONTRACT * to_usd \
             + config.PAPER_COMMISSION_PER_LOT_RT * p.volume
         net = gross - cost
         self.realised_today += net
         self.trades_today += 1
         box_lvl = p.box_hi if p.side > 0 else p.box_lo
-        from livebot import logbook
-        logbook.trade(dict(
-            date=p.entry_time.strftime("%Y-%m-%d"), box_high=round(p.box_hi, 2), box_low=round(p.box_lo, 2),
-            box_width=round(p.box_hi - p.box_lo, 2), side="long" if p.side > 0 else "short",
-            entry_time_utc=p.entry_time.strftime("%H:%M"), entry_px=round(p.entry_px, 2),
-            entry_spread=round(p.entry_spread, 3), stop_px=round(p.sl, 2),
-            exit_time_utc=self.tick().time.strftime("%H:%M"), exit_px=round(exit_px, 2), exit_reason=reason,
+        d = config.DIGITS
+        row = dict(
+            date=p.entry_time.strftime("%Y-%m-%d"), box_high=round(p.box_hi, d), box_low=round(p.box_lo, d),
+            box_width=round(p.box_hi - p.box_lo, d), side="long" if p.side > 0 else "short",
+            entry_time_utc=p.entry_time.strftime("%H:%M"), entry_px=round(p.entry_px, d),
+            entry_spread=round(p.entry_spread, d + 1), stop_px=round(p.sl, d),
+            exit_time_utc=exit_time.strftime("%H:%M"), exit_px=round(exit_px, d), exit_reason=reason,
             gross_pnl=round(gross, 2), cost=round(cost, 2), net_pnl=round(net, 2),
-            slippage_vs_box=round(p.side * (p.entry_px - box_lvl), 3), ticket=p.ticket, notes="paper",
-        ))
+            slippage_vs_box=round(p.side * (p.entry_px - box_lvl), d + 1), ticket=p.ticket, notes="paper",
+            symbol=config.SYMBOL, pips=round(p.side * (exit_px - p.entry_px) / config.PIP, 1),
+        )
+        from livebot import logbook
+        logbook.trade(row)
         self._pos = None
+        if hasattr(self.feed, "replay_data"):
+            logbook.replay(row, p.entry_time, exit_time, self.feed)
 
 
 class Mt5Broker:

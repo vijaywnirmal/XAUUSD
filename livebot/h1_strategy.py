@@ -36,6 +36,11 @@ BREAK_END = _hhmm(config.BREAK_END_UTC)
 FLAT = _hhmm(config.FLAT_UTC)
 
 
+def _p(x: float) -> str:
+    """A price in the instrument's own precision (gold 2 decimals, EURUSD 5)."""
+    return f"{x:.{config.DIGITS}f}"
+
+
 # ------------------------------------------------------------------- I/O types
 @dataclass(frozen=True)
 class Bar:
@@ -142,20 +147,20 @@ def decide(ctx: Context):
 
     # 5. day-quality filters
     if config.MAX_BOX_WIDTH_USD is not None and width > config.MAX_BOX_WIDTH_USD:
-        return Skip(f"box too wide ${width:.2f} > ${config.MAX_BOX_WIDTH_USD:.2f}")
+        return Skip(f"box too wide {_p(width)} > {_p(config.MAX_BOX_WIDTH_USD)}")
 
     # 6. don't chase: if price already broke a level before we ever armed, skip
     if not ctx.armed_ever_today and (ctx.last_price > box_hi or ctx.last_price < box_lo):
-        return Skip(f"broke box before arm (px {ctx.last_price:.2f}, box {box_lo:.2f}-{box_hi:.2f})")
+        return Skip(f"broke box before arm (px {_p(ctx.last_price)}, box {_p(box_lo)}-{_p(box_hi)})")
 
     # 7. spread guard - gates the FIRST arm; pulls a working OCO only on a spike
     spread_bad = ctx.spread_usd is not None and ctx.spread_usd > config.MAX_SPREAD_USD
     if ctx.has_pending:
         if spread_bad:
-            return CancelPending(f"spread spike ${ctx.spread_usd:.3f}")
+            return CancelPending(f"spread spike {ctx.spread_usd:.{config.DIGITS + 1}f}")
         return Wait("armed - OCO working, monitoring breakout")
     if spread_bad:
-        return Wait(f"spread ${ctx.spread_usd:.3f} > ${config.MAX_SPREAD_USD:.2f} - not arming yet")
+        return Wait(f"spread {ctx.spread_usd:.{config.DIGITS + 1}f} > {_p(config.MAX_SPREAD_USD)} - not arming yet")
 
     # 8. arm
     return PlaceOco(buy_stop=box_hi, sell_stop=box_lo, buy_sl=box_lo, sell_sl=box_hi,

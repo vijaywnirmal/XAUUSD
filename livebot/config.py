@@ -18,9 +18,37 @@ import os
 MODE = os.environ.get("LIVEBOT_MODE", "paper").lower()
 CONFIRM_LIVE = os.environ.get("LIVEBOT_CONFIRM_LIVE", "").lower() == "yes"
 
-SYMBOL = os.environ.get("LIVEBOT_SYMBOL", "XAUUSD")
-MAGIC = 910001                         # position/order tag — the bot only touches its own
+SYMBOL = os.environ.get("LIVEBOT_SYMBOL", "XAUUSD").upper()
 ORDER_COMMENT = "H1_ORB"
+
+# ---------------------------------------------------------------- instruments
+# The same H1 rules run on each instrument (one process per symbol - see fleet.py). Prices are in the
+# instrument's own units: max_box / max_spread / slippage are $ for gold, price units for FX (0.0030 =
+# 30 pips on EURUSD). Only XAUUSD's values come from the backtest; the FX guards are sane "this day is
+# abnormal" caps, not tuned. quote_usd=False: P&L is in the quote currency and is converted to USD at the
+# exit price (USDJPY -> JPY, USDCAD -> CAD).
+INSTRUMENTS = {
+    "XAUUSD": dict(contract=100.0, digits=2, pip=0.01, max_box=12.0, max_spread=0.60, slippage=0.02,
+                   quote_usd=True, magic=910001),
+    "EURUSD": dict(contract=100_000.0, digits=5, pip=0.0001, max_box=0.0030, max_spread=0.0002,
+                   slippage=0.00002, quote_usd=True, magic=910002),
+    "GBPUSD": dict(contract=100_000.0, digits=5, pip=0.0001, max_box=0.0040, max_spread=0.0003,
+                   slippage=0.00002, quote_usd=True, magic=910003),
+    "USDJPY": dict(contract=100_000.0, digits=3, pip=0.01, max_box=0.40, max_spread=0.03,
+                   slippage=0.002, quote_usd=False, magic=910004),
+    "AUDUSD": dict(contract=100_000.0, digits=5, pip=0.0001, max_box=0.0025, max_spread=0.0002,
+                   slippage=0.00002, quote_usd=True, magic=910005),
+    "USDCAD": dict(contract=100_000.0, digits=5, pip=0.0001, max_box=0.0030, max_spread=0.0003,
+                   slippage=0.00002, quote_usd=False, magic=910006),
+}
+if SYMBOL not in INSTRUMENTS:
+    raise SystemExit(f"LIVEBOT_SYMBOL={SYMBOL!r} has no settings in livebot/config.py INSTRUMENTS")
+INSTRUMENT = INSTRUMENTS[SYMBOL]
+CONTRACT = INSTRUMENT["contract"]      # units per 1.0 lot
+DIGITS = INSTRUMENT["digits"]
+PIP = INSTRUMENT["pip"]
+QUOTE_USD = INSTRUMENT["quote_usd"]
+MAGIC = INSTRUMENT["magic"]            # position/order tag — the bot only touches its own
 
 # ---------------------------------------------------------------- H1 strategy
 # These MUST match backtest/… H1: 13:30-14:00 UTC box, break 14:00-18:00,
@@ -32,13 +60,13 @@ FLAT_UTC = "20:00"                    # force any open position flat at/after th
 LOTS = 0.01
 # Skip the day if the box is wider than this (backtest note: edge is thin on
 # wide-box days). None disables the check.
-MAX_BOX_WIDTH_USD = 12.0
+MAX_BOX_WIDTH_USD = INSTRUMENT["max_box"]     # price units (the name predates FX)
 # Spread guard. Blocks the FIRST arming of the day while the quote is wider than
 # this, and pulls a working OCO if the spread spikes past it (news event). It is
 # NOT a per-tick flap gate — set it to "something is clearly wrong" (~p99 of
 # normal, ≈$0.60), not to the ~$0.34 typical. The backtest already charges the
 # real spread; this only protects against pathological quotes.
-MAX_SPREAD_USD = 0.60
+MAX_SPREAD_USD = INSTRUMENT["max_spread"]     # price units
 
 # ---------------------------------------------------------------- risk guards
 MAX_TRADES_PER_DAY = 1
@@ -57,11 +85,20 @@ ORDER_RETRIES = 2
 # ---------------------------------------------------------------- paper sim
 PAPER_START_BALANCE = 1000.0
 PAPER_COMMISSION_PER_LOT_RT = 6.0     # Vantage Raw ECN: $3/side => $6 round-turn/lot
-PAPER_SLIPPAGE_USD = 0.02            # per side, added to the fill
+PAPER_SLIPPAGE_USD = INSTRUMENT["slippage"]  # per side, price units, added to the fill
 
 # ---------------------------------------------------------------- replay
 REPLAY_TF = "5min"
 REPLAY_START = os.environ.get("LIVEBOT_REPLAY_START", "2024-01-01")
 REPLAY_END = os.environ.get("LIVEBOT_REPLAY_END", "2024-04-01")
 
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+_LOGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+LOG_DIR = _LOGS if SYMBOL == "XAUUSD" else os.path.join(_LOGS, SYMBOL)  # gold keeps the original location
+
+# ---------------------------------------------------------------- unattended runs (fleet.py sets these)
+# Exit once the day is finished (skipped, or traded and flat) instead of polling until killed.
+EXIT_AFTER_DAY = os.environ.get("LIVEBOT_EXIT_AFTER_DAY", "") == "1"
+# Run after each closed trade (e.g. start the video job); the trade's replay file is written first.
+ON_TRADE_CMD = os.environ.get("LIVEBOT_ON_TRADE_CMD", "")
+# Minutes of M1 history before the box saved with each trade's replay
+REPLAY_LEAD_MIN = 15

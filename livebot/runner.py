@@ -17,6 +17,10 @@ from livebot import h1_strategy as H
 from livebot.brokers import make_broker
 
 
+class _DayDone(Exception):
+    """EXIT_AFTER_DAY: the day is finished and nothing is open."""
+
+
 class Runner:
     def __init__(self):
         self.broker = make_broker()
@@ -56,6 +60,8 @@ class Runner:
         )
         if self._day_done and not ctx.has_position and not ctx.has_pending:
             self._publish(ctx, tick, "day complete")
+            if config.EXIT_AFTER_DAY and config.MODE != "replay":
+                raise _DayDone()
             return
 
         intent = H.decide(ctx)
@@ -110,11 +116,11 @@ class Runner:
         statusfile.write({
             "account": self._acct,
             "now_utc": ctx.now.isoformat(timespec="seconds"),
-            "price": round(tick.mid, 2),
+            "price": round(tick.mid, config.DIGITS),
             "spread": round(tick.spread, 4),
             "box": None if box is None else {
-                "high": round(box[0], 2), "low": round(box[1], 2),
-                "width": round(box[0] - box[1], 2), "bars": box[2]},
+                "high": round(box[0], config.DIGITS), "low": round(box[1], config.DIGITS),
+                "width": round(box[0] - box[1], config.DIGITS), "bars": box[2]},
             "state": label,
             "armed_today": self._armed_ever,
             "day_done": self._day_done,
@@ -124,8 +130,8 @@ class Runner:
             "kill_switch": ctx.kill_switch,
             "position": None if pos is None else {
                 "side": "long" if pos.side > 0 else "short",
-                "entry": round(pos.entry_px, 2), "sl": round(pos.sl, 2),
-                "unrealised": round(pos.side * (tick.mid - pos.entry_px) * pos.volume * 100.0, 2)},
+                "entry": round(pos.entry_px, config.DIGITS), "sl": round(pos.sl, config.DIGITS),
+                "unrealised": round(pos.side * (tick.mid - pos.entry_px) * pos.volume * config.CONTRACT, 2)},
         })
 
     # ---- run --------------------------------------------------------------
@@ -169,13 +175,21 @@ class Runner:
             self.broker.shutdown()
 
     def _run_realtime(self):
+        last_error = None
         while True:
             try:
                 self.step(datetime.now(timezone.utc))
-            except Exception:
-                logbook.event("ERROR")
-                import traceback
-                traceback.print_exc()
+                last_error = None
+            except _DayDone:
+                logbook.event("EXIT", reason="day complete")
+                return
+            except Exception as e:
+                msg = f"{type(e).__name__}: {e}"
+                if msg != last_error:  # log a repeating error once, not every poll
+                    logbook.event("ERROR", msg=msg)
+                    import traceback
+                    traceback.print_exc()
+                last_error = msg
             time.sleep(config.POLL_SECONDS)
 
     def _run_replay(self):
